@@ -58,7 +58,7 @@ Geo-grid tracking shows the full picture, and paid tools charge **$50–$100+ pe
 Requires Python 3.10+.
 
 ```bash
-git clone https://github.com/<your-username>/geogrid.git
+git clone https://github.com/orenagassy/geogrid.git
 cd geogrid
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt        # macOS/Linux: .venv/bin/pip
