@@ -7,20 +7,21 @@ import os
 
 import httpx
 
-from .base import MAX_RESULTS, FetchError
+from .base import MAX_RESULTS, Fetcher, FetchError
 
 ENDPOINT = "https://api.dataforseo.com/v3/serp/google/maps/live/advanced"
 
 
 class DataForSEOFetcher:
-    def __init__(self, login: str | None = None, password: str | None = None, zoom: int = 14, lang: str = "en"):
+    def __init__(self, resolver: Fetcher, login: str | None = None, password: str | None = None, zoom: int = 14,
+                 lang: str = "en"):
         login = login or os.environ.get("DATAFORSEO_LOGIN")
         password = password or os.environ.get("DATAFORSEO_PASSWORD")
         if not login or not password:
             raise RuntimeError("DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD must be set")
         self.zoom, self.lang = zoom, lang
         self._client = httpx.AsyncClient(auth=(login, password), timeout=90)
-        self._resolver = None
+        self._resolver = resolver
 
     async def fetch(self, keyword: str, lat: float, lng: float) -> list[dict]:
         body = [{"keyword": keyword, "location_coordinate": f"{lat},{lng},{self.zoom}z",
@@ -53,12 +54,8 @@ class DataForSEOFetcher:
         return out[:MAX_RESULTS]
 
     async def resolve_business(self, query: str) -> dict:
-        if self._resolver is None:
-            from .playwright_maps import PlaywrightMapsFetcher
-            self._resolver = PlaywrightMapsFetcher()
         return await self._resolver.resolve_business(query)
 
     async def close(self) -> None:
         await self._client.aclose()
-        if self._resolver:
-            await self._resolver.close()
+        await self._resolver.close()

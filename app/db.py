@@ -72,6 +72,7 @@ def connect():
 
 def init_db() -> None:
     with connect() as c:
+        c.execute("PRAGMA journal_mode = WAL")  # live progress reads don't block per-point writes
         c.executescript(SCHEMA)
 
 
@@ -139,7 +140,10 @@ def _scan_row(r: sqlite3.Row) -> dict:
 
 
 def list_scans(business_id: int | None = None, limit: int = 100) -> list[dict]:
-    sql = ("SELECT s.*, b.name AS business_name FROM scans s JOIN businesses b ON b.id = s.business_id"
+    # Leaves out the (large) competitors column: lists only need metrics.
+    sql = ("SELECT s.id, s.business_id, s.keyword, s.grid_size, s.spacing_km, s.center_lat, s.center_lng, s.status,"
+           " s.progress, s.total, s.metrics, s.error, s.created, s.finished, b.name AS business_name"
+           " FROM scans s JOIN businesses b ON b.id = s.business_id"
            + (" WHERE s.business_id = ?" if business_id else "") + " ORDER BY s.id DESC LIMIT ?")
     args = (business_id, limit) if business_id else (limit,)
     with connect() as c:

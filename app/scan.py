@@ -5,7 +5,7 @@ import os
 
 from . import db
 from .fetchers.base import Fetcher
-from .grid import make_grid
+from .grid import make_grid, validate_grid
 from .matching import find_rank
 from .metrics import competitor_leaderboard, scan_metrics
 
@@ -16,20 +16,31 @@ MAX_CONSECUTIVE_ERRORS = 5
 
 def make_fetcher() -> Fetcher:
     """GEOGRID_FETCHER=playwright (default, free) | dataforseo (needs DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD)."""
-    kind = os.environ.get("GEOGRID_FETCHER", "playwright").lower()
-    if kind == "dataforseo":
-        from .fetchers.dataforseo import DataForSEOFetcher
-        return DataForSEOFetcher()
     from .fetchers.playwright_maps import PlaywrightMapsFetcher
-    return PlaywrightMapsFetcher(headless=os.environ.get("GEOGRID_HEADLESS", "1") != "0",
-                                 proxy=os.environ.get("GEOGRID_PROXY") or None)
+    browser = PlaywrightMapsFetcher(headless=os.environ.get("GEOGRID_HEADLESS", "1") != "0",
+                                    proxy=os.environ.get("GEOGRID_PROXY") or None)
+    if os.environ.get("GEOGRID_FETCHER", "playwright").lower() == "dataforseo":
+        from .fetchers.dataforseo import DataForSEOFetcher
+        return DataForSEOFetcher(resolver=browser)  # browser only resolves businesses
+    return browser
 
 
 def default_concurrency() -> int:
     return int(os.environ.get("GEOGRID_CONCURRENCY", "2"))
 
 
-async def run_scan(scan_id: int, fetcher: Fetcher, concurrency: int | None = None) -> dict:
+def create_scans(biz: dict, keywords: list[str], grid_size: int, spacing_km: float,
+                 center: tuple[float, float] | None = None) -> list[int]:
+    """Validate once and queue one scan per keyword. Raises ValueError on bad input."""
+    keywords = [k.strip() for k in keywords if k.strip()]
+    if not keywords:
+        raise ValueError("no keywords")
+    validate_grid(grid_size, spacing_km)
+    lat, lng = center or (biz["lat"], biz["lng"])
+    return [db.create_scan(biz["id"], kw, grid_size, spacing_km, lat, lng) for kw in keywords]
+
+
+async def run_scan(scan_id: int, fetcher: Fetcher, concurrency: int | None = None) -> None:
     scan = db.get_scan(scan_id, with_points=False)
     target = {"cid": scan["business_cid"], "name": scan["business_name"]}
     grid = make_grid(scan["center_lat"], scan["center_lng"], scan["grid_size"], scan["spacing_km"])
@@ -69,7 +80,6 @@ async def run_scan(scan_id: int, fetcher: Fetcher, concurrency: int | None = Non
         metrics = scan_metrics([rank for rank, _ in ok])
         metrics["errors"] = len(grid) - len(ok)
         db.finish_scan(scan_id, "done", metrics, competitor_leaderboard([res for _, res in ok]))
-    return db.get_scan(scan_id)
 
 
 def compare(scan: dict, prev: dict) -> dict:

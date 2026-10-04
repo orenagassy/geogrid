@@ -1,5 +1,4 @@
 """Scan metrics: ARP, ATRP, SoLV and a competitor leaderboard."""
-from collections import defaultdict
 
 NOT_FOUND_RANK = 21
 
@@ -22,8 +21,7 @@ def competitor_leaderboard(points_results: list[list[dict]], limit: int = 20) ->
     n = len(points_results)
     if not n:
         return []
-    seen: dict[str, dict] = {}
-    ranks: dict[str, list[int]] = defaultdict(list)
+    seen: dict[str, tuple[dict, list[int]]] = {}
     for results in points_results:
         counted = set()
         for i, r in enumerate(results, 1):
@@ -31,22 +29,11 @@ def competitor_leaderboard(points_results: list[list[dict]], limit: int = 20) ->
             if not key or key in counted:
                 continue
             counted.add(key)
-            seen.setdefault(key, r)
-            ranks[key].append(i)
+            seen.setdefault(key, (r, []))[1].append(i)
     board = []
-    for key, rs in ranks.items():
-        info = seen[key]
-        atrp = (sum(rs) + NOT_FOUND_RANK * (n - len(rs))) / n
-        board.append({
-            "name": info.get("name"),
-            "cid": info.get("cid"),
-            "rating": info.get("rating"),
-            "reviews": info.get("reviews"),
-            "category": info.get("category"),
-            "found_pct": round(100 * len(rs) / n, 1),
-            "arp": round(sum(rs) / len(rs), 2),
-            "atrp": round(atrp, 2),
-            "solv": round(100 * sum(1 for r in rs if r <= 3) / n, 1),
-        })
+    for info, rs in seen.values():
+        m = scan_metrics(rs + [None] * (n - len(rs)))
+        del m["points"]
+        board.append({k: info.get(k) for k in ("name", "cid", "rating", "reviews", "category")} | m)
     board.sort(key=lambda b: (-b["solv"], b["atrp"]))
     return board[:limit]

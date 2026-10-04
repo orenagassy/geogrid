@@ -16,8 +16,8 @@ PLACE_TITLE = "h1"
 
 # Runs inside the page; returns one dict per result card in feed order.
 EXTRACT_JS = r"""
-() => {
-  const feed = document.querySelector('div[role="feed"]');
+(feedSel) => {
+  const feed = document.querySelector(feedSel);
   if (!feed) return [];
   return [...feed.querySelectorAll('div[role="article"]')].map(card => {
     const link = card.querySelector('a.hfpxzc');
@@ -40,8 +40,8 @@ EXTRACT_JS = r"""
 """
 
 PLACE_JS = r"""
-() => {
-  const h1 = document.querySelector('h1');
+(titleSel) => {
+  const h1 = document.querySelector(titleSel);
   const cat = document.querySelector('button[jsaction*="category"]');
   const addr = document.querySelector('button[data-item-id="address"]');
   const stars = document.querySelector('div.F7nice span[aria-hidden="true"]');
@@ -101,40 +101,47 @@ class PlaywrightMapsFetcher:
         if "/sorry/" in page.url or "consent.google" in page.url:
             raise FetchError(f"blocked by Google ({page.url[:80]})")
 
+    async def _open(self, page: Page, url: str) -> bool:
+        """Load a Maps search/place URL. True = a results feed, False = Maps jumped to a single place."""
+        await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        self._check_blocked(page)
+        try:
+            await page.wait_for_selector(f"{FEED}, {PLACE_TITLE}", timeout=20000)
+        except Exception as e:
+            self._check_blocked(page)
+            raise FetchError(f"no results panel: {e}") from e
+        return bool(await page.locator(FEED).count())
+
+    async def _read_place(self, page: Page, timeout: int) -> dict:
+        await page.wait_for_function("location.href.includes('!3d')", timeout=timeout)
+        return {**await page.evaluate(PLACE_JS, PLACE_TITLE), **parse_place_url(page.url)}
+
     async def fetch(self, keyword: str, lat: float, lng: float) -> list[dict]:
         await asyncio.sleep(random.uniform(*self.delay))
         page = await self._new_page(lat, lng)
         try:
             url = f"https://www.google.com/maps/search/{quote(keyword)}/@{lat},{lng},{self.zoom}z?hl={self.lang}"
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            self._check_blocked(page)
-            try:
-                await page.wait_for_selector(f"{FEED}, {PLACE_TITLE}", timeout=20000)
-            except Exception as e:
-                self._check_blocked(page)
-                raise FetchError(f"no results panel: {e}") from e
-            if not await page.locator(FEED).count():
-                # Maps jumped straight to a single place: that place is the only result.
-                await page.wait_for_function("location.href.includes('!3d')", timeout=10000)
-                info = await page.evaluate(PLACE_JS)
-                return [{**info, "reviews": None, **parse_place_url(page.url)}] if info.get("name") else []
+            if not await self._open(page, url):
+                # The single place is the only result.
+                info = await self._read_place(page, 10000)
+                return [{"reviews": None, **info}] if info.get("name") else []
             return cards_to_results(await self._scroll_and_extract(page))
         finally:
             await page.context.close()
 
     async def _scroll_and_extract(self, page: Page) -> list[dict]:
         feed = page.locator(FEED)
-        cards, stale = [], 0
+        cards, stale = await page.evaluate(EXTRACT_JS, FEED), 0
         for _ in range(15):
-            cards = await page.evaluate(EXTRACT_JS)
             if len(cards_to_results(cards)) >= MAX_RESULTS:
                 break
             if await page.get_by_text("reached the end of the list").count():
                 break
-            before = len(cards)
             await feed.evaluate("el => el.scrollBy(0, el.scrollHeight)")
             await page.wait_for_timeout(1200)
-            stale = stale + 1 if len(await page.evaluate(EXTRACT_JS)) == before else 0
+            more = await page.evaluate(EXTRACT_JS, FEED)
+            stale = stale + 1 if len(more) == len(cards) else 0
+            cards = more
             if stale >= 3:
                 break
         return cards
@@ -142,22 +149,14 @@ class PlaywrightMapsFetcher:
     async def resolve_business(self, query: str) -> dict:
         page = await self._new_page()
         try:
-            if query.startswith("http"):
-                url = query
-            else:
-                url = f"https://www.google.com/maps/search/{quote(query)}?hl={self.lang}"
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            self._check_blocked(page)
-            await page.wait_for_selector(f"{FEED}, {PLACE_TITLE}", timeout=20000)
-            if await page.locator(FEED).count():
+            url = query if query.startswith("http") else f"https://www.google.com/maps/search/{quote(query)}?hl={self.lang}"
+            if await self._open(page, url):
                 # Several matches: take the first organic one.
-                results = cards_to_results(await page.evaluate(EXTRACT_JS), limit=1)
+                results = cards_to_results(await page.evaluate(EXTRACT_JS, FEED), limit=1)
                 if not results:
                     raise FetchError(f"no business found for {query!r}")
                 return results[0]
-            await page.wait_for_function("location.href.includes('!3d')", timeout=15000)
-            info = await page.evaluate(PLACE_JS)
-            biz = {**info, **parse_place_url(page.url)}
+            biz = await self._read_place(page, 15000)
             if not biz.get("name") or "lat" not in biz:
                 raise FetchError(f"could not read business details for {query!r}")
             return biz

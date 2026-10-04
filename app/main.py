@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from . import db
 from .fetchers.base import FetchError
-from .scan import compare, make_fetcher, run_scan
+from .scan import compare, create_scans, make_fetcher, run_scan
 
 STATIC = Path(__file__).parent / "static"
 log = logging.getLogger("geogrid")
@@ -92,17 +92,14 @@ async def _run_queued(scan_ids: list[int]) -> None:
 
 @app.post("/api/scans")
 async def start_scans(body: ScanIn):
-    if body.grid_size % 2 == 0:
-        raise HTTPException(422, "grid size must be odd")
     biz = db.get_business(body.business_id)
     if not biz:
         raise HTTPException(404, "business not found")
-    lat = body.center_lat if body.center_lat is not None else biz["lat"]
-    lng = body.center_lng if body.center_lng is not None else biz["lng"]
-    keywords = [k.strip() for k in body.keywords if k.strip()]
-    if not keywords:
-        raise HTTPException(422, "no keywords")
-    ids = [db.create_scan(biz["id"], kw, body.grid_size, body.spacing_km, lat, lng) for kw in keywords]
+    center = (body.center_lat, body.center_lng) if body.center_lat is not None and body.center_lng is not None else None
+    try:
+        ids = create_scans(biz, body.keywords, body.grid_size, body.spacing_km, center)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     asyncio.create_task(_run_queued(ids))
     return {"scan_ids": ids}
 

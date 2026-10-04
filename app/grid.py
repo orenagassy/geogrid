@@ -38,12 +38,16 @@ def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return 2 * EARTH_RADIUS_KM * math.asin(math.sqrt(a))
 
 
-def make_grid(center_lat: float, center_lng: float, size: int, spacing_km: float) -> list[GridPoint]:
-    """size x size points (size odd, 3..13), row 0 = north, col 0 = west."""
+def validate_grid(size: int, spacing_km: float) -> None:
     if size % 2 == 0 or not 3 <= size <= 13:
         raise ValueError("grid size must be an odd number between 3 and 13")
     if spacing_km <= 0:
         raise ValueError("spacing must be positive")
+
+
+def make_grid(center_lat: float, center_lng: float, size: int, spacing_km: float) -> list[GridPoint]:
+    """size x size points (size odd, 3..13), row 0 = north, col 0 = west."""
+    validate_grid(size, spacing_km)
     half = size // 2
     points = []
     for row in range(size):

@@ -11,7 +11,7 @@ import sys
 
 from . import db
 from .grid import parse_distance_km
-from .scan import make_fetcher, run_scan
+from .scan import create_scans, make_fetcher, run_scan
 
 
 def print_grid(scan: dict) -> None:
@@ -55,15 +55,18 @@ async def cmd_scan(args) -> int:
             info = await fetcher.resolve_business(args.business)
             biz = db.get_business(db.upsert_business(info))
             print(f"  -> {biz['name']} (id {biz['id']}, cid {biz['cid']}) at {biz['lat']},{biz['lng']}")
-        lat, lng = biz["lat"], biz["lng"]
-        if args.center:
-            lat, lng = (float(x) for x in args.center.split(","))
-        spacing = parse_distance_km(args.spacing)
+        center = tuple(float(x) for x in args.center.split(",")) if args.center else None
+        try:
+            scan_ids = create_scans(biz, args.keyword, args.grid, parse_distance_km(args.spacing), center)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 2
         exit_code = 0
-        for kw in args.keyword:
-            scan_id = db.create_scan(biz["id"], kw, args.grid, spacing, lat, lng)
-            print(f"Scanning \"{kw}\" ({args.grid * args.grid} points) ...")
-            scan = await run_scan(scan_id, fetcher, args.concurrency)
+        for scan_id in scan_ids:
+            scan = db.get_scan(scan_id, with_points=False)
+            print(f"Scanning \"{scan['keyword']}\" ({scan['total']} points) ...")
+            await run_scan(scan_id, fetcher, args.concurrency)
+            scan = db.get_scan(scan_id)
             print_summary(scan)
             if scan["status"] != "done":
                 exit_code = 1

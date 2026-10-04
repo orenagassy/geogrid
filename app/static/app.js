@@ -37,6 +37,8 @@ async function api(path, opts = {}) {
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (v, suffix = "") => (v === null || v === undefined ? "–" : `${v}${suffix}`);
 const when = (iso) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+const gridLabel = (s) => `${s.grid_size}×${s.grid_size} @ ${+s.spacing_km.toFixed(2)} km`;
+function say(sel, kind, text) { const el = $(sel); el.className = `small ${kind}`; el.textContent = text; }
 
 function offset(lat, lng, northKm, eastKm) {
   const dLat = (northKm / EARTH_KM) * 180 / Math.PI;
@@ -61,10 +63,8 @@ function rankIn(results, key) {
   const i = (results || []).findIndex((r) => sameBiz(r, key));
   return i === -1 ? null : i + 1;
 }
-function targetKey() {
-  if (S.competitor) return S.competitor;
-  return { cid: S.scan.business_cid, name: S.scan.business_name };
-}
+const myKey = () => ({ cid: S.scan.business_cid, name: S.scan.business_name });
+const targetKey = () => S.competitor || myKey();
 
 // ---------- businesses ----------
 async function loadBusinesses(selectId) {
@@ -78,10 +78,8 @@ async function loadBusinesses(selectId) {
 }
 
 async function selectBusiness(id) {
-  stopPolling();
+  closeScan();
   S.business = S.businesses.find((b) => b.id === id) || null;
-  S.scan = null; S.competitor = null;
-  $("#scanCard").classList.add("hidden"); $("#compCard").classList.add("hidden");
   $("#runBtn").disabled = !S.business;
   if (!S.business) { $("#bizInfo").textContent = ""; gridLayer.clearLayers(); return; }
   localSet("bizId", id);
@@ -104,14 +102,14 @@ $("#bizForm").addEventListener("submit", async (e) => {
   const q = $("#bizQuery").value.trim();
   if (!q) return;
   const btn = e.submitter; btn.disabled = true;
-  $("#bizMsg").className = "small muted"; $("#bizMsg").textContent = "Looking it up on Google Maps…";
+  say("#bizMsg", "muted", "Looking it up on Google Maps…");
   try {
     const b = await api("/api/businesses", { method: "POST", body: JSON.stringify({ query: q }) });
-    $("#bizMsg").className = "small ok"; $("#bizMsg").textContent = `Added: ${b.name}`;
+    say("#bizMsg", "ok", `Added: ${b.name}`);
     $("#bizQuery").value = "";
     await loadBusinesses(b.id);
   } catch (err) {
-    $("#bizMsg").className = "small err"; $("#bizMsg").textContent = err.message;
+    say("#bizMsg", "err", err.message);
   } finally { btn.disabled = false; }
 });
 
@@ -147,9 +145,9 @@ function showPreview() {  // leave the scan view and show the grid that will be 
 }
 function fitGrid() {
   if (!S.center) return;
-  const n = S.scan ? S.scan.grid_size : +$("#gridSize").value;
-  const km = S.scan ? S.scan.spacing_km : spacingKm();
-  const c = S.scan ? [S.scan.center_lat, S.scan.center_lng] : S.center;
+  const [n, km, c] = S.scan
+    ? [S.scan.grid_size, S.scan.spacing_km, [S.scan.center_lat, S.scan.center_lng]]
+    : [+$("#gridSize").value, spacingKm(), S.center];
   const h = (Math.floor(n / 2) + 0.7) * km;
   const pad = cardPadding();
   map.fitBounds([offset(c[0], c[1], -h, -h), offset(c[0], c[1], h, h)], { paddingTopLeft: pad.topLeft, paddingBottomRight: pad.bottomRight });
@@ -163,18 +161,18 @@ function keywords() { return $("#keywords").value.split("\n").map((k) => k.trim(
 $("#runBtn").addEventListener("click", async () => {
   const kws = keywords();
   if (!S.business) return;
-  if (!kws.length) { $("#runMsg").className = "small err"; $("#runMsg").textContent = "Enter at least one keyword."; return; }
+  if (!kws.length) { say("#runMsg", "err", "Enter at least one keyword."); return; }
   $("#runBtn").disabled = true; $("#runMsg").textContent = "";
   try {
     const { scan_ids } = await api("/api/scans", { method: "POST", body: JSON.stringify({
       business_id: S.business.id, keywords: kws, grid_size: +$("#gridSize").value,
       spacing_km: +spacingKm().toFixed(4), center_lat: S.center[0], center_lng: S.center[1],
     }) });
-    $("#runMsg").className = "small ok"; $("#runMsg").textContent = `Started ${scan_ids.length} scan${scan_ids.length > 1 ? "s" : ""}.`;
+    say("#runMsg", "ok", `Started ${scan_ids.length} scan${scan_ids.length > 1 ? "s" : ""}.`);
     await loadHistory();
     await openScan(scan_ids[0]);
   } catch (err) {
-    $("#runMsg").className = "small err"; $("#runMsg").textContent = err.message;
+    say("#runMsg", "err", err.message);
   } finally { $("#runBtn").disabled = false; }
 });
 
@@ -189,7 +187,7 @@ async function loadHistory() {
     const badge = s.status === "done" ? `SoLV ${fmt(m.solv, "%")}` : s.status === "running" ? `${s.progress}/${s.total}` : "failed";
     return `<li class="item ${S.scan && S.scan.id === s.id ? "active" : ""}" data-id="${s.id}">
       <span class="kw">${esc(s.keyword)}</span><span class="badge ${s.status}">${badge}</span>
-      <span class="meta">${when(s.created)} · ${s.grid_size}×${s.grid_size} @ ${+s.spacing_km.toFixed(2)} km${s.status === "done" ? ` · ARP ${fmt(m.arp)}` : ""}</span></li>`;
+      <span class="meta">${when(s.created)} · ${gridLabel(s)}${s.status === "done" ? ` · ARP ${fmt(m.arp)}` : ""}</span></li>`;
   }).join("");
 }
 $("#history").addEventListener("click", (e) => { const li = e.target.closest("li.item"); if (li) openScan(+li.dataset.id); });
@@ -218,7 +216,7 @@ function renderScan(fit) {
   if (centerMarker) centerMarker.remove();  // it would cover the middle rank pin
   $("#scanCard").classList.remove("hidden");
   $("#scanTitle").textContent = `“${s.keyword}”`;
-  $("#scanSub").textContent = `${s.business_name} · ${when(s.created)} · ${s.grid_size}×${s.grid_size} @ ${+s.spacing_km.toFixed(2)} km`;
+  $("#scanSub").textContent = `${s.business_name} · ${when(s.created)} · ${gridLabel(s)}`;
 
   const prog = $("#progress");
   if (s.status === "running") {
@@ -267,7 +265,7 @@ function renderMetrics() {
 function renderCompetitors() {
   const s = S.scan, list = s.competitors || [];
   $("#compCard").classList.toggle("hidden", !list.length);
-  const me = { cid: s.business_cid, name: s.business_name };
+  const me = myKey();
   $("#compTable tbody").innerHTML = list.map((c, i) => `
     <tr data-i="${i}" class="${sameBiz(c, me) ? "me" : ""} ${S.competitor && sameBiz(c, S.competitor) ? "sel" : ""}">
       <td>${i + 1}</td><td title="${esc(c.name)}${c.category ? " · " + esc(c.category) : ""}">${esc(c.name)}</td>
@@ -276,7 +274,7 @@ function renderCompetitors() {
 $("#compTable tbody").addEventListener("click", (e) => {
   const tr = e.target.closest("tr"); if (!tr) return;
   const c = S.scan.competitors[+tr.dataset.i];
-  const isMe = sameBiz(c, { cid: S.scan.business_cid, name: S.scan.business_name });
+  const isMe = sameBiz(c, myKey());
   S.competitor = isMe || (S.competitor && sameBiz(c, S.competitor)) ? null : { cid: c.cid, name: c.name };
   if (S.competitor) S.mode = "rank";
   renderScan(false);
@@ -292,6 +290,7 @@ function drawScanGrid() {
   const key = targetKey();
   const byCell = new Map(s.points.map((p) => [`${p.row},${p.col}`, p]));
   const pts = gridPoints(s.center_lat, s.center_lng, s.grid_size, s.spacing_km);
+  const pad = cardPadding();
   pts.forEach(([lat, lng], idx) => {
     const row = Math.floor(idx / s.grid_size), col = idx % s.grid_size;
     const p = byCell.get(`${row},${col}`);
@@ -311,10 +310,7 @@ function drawScanGrid() {
       } else { cls = rankClass(rank); label = rank ?? "20+"; }
     }
     const m = L.marker([lat, lng], { icon: L.divIcon({ className: "", html: `<div class="pin ${cls}">${label}</div>`, iconSize: [34, 34] }) });
-    if (p) {
-      const pad = cardPadding();
-      m.bindPopup(() => popupHtml(p, key), { maxWidth: 320, autoPanPaddingTopLeft: L.point(pad.topLeft), autoPanPaddingBottomRight: L.point(pad.bottomRight) });
-    }
+    if (p) m.bindPopup(() => popupHtml(p, key), { maxWidth: 320, autoPanPaddingTopLeft: L.point(pad.topLeft), autoPanPaddingBottomRight: L.point(pad.bottomRight) });
     m.addTo(gridLayer);
   });
 }
@@ -346,4 +342,4 @@ function localGet(k) { try { return localStorage.getItem("geogrid." + k); } catc
 function localSet(k, v) { try { localStorage.setItem("geogrid." + k, v); } catch { /* storage unavailable */ } }
 
 updateHint();
-loadBusinesses().catch((e) => { $("#bizMsg").className = "small err"; $("#bizMsg").textContent = e.message; });
+loadBusinesses().catch((e) => say("#bizMsg", "err", e.message));

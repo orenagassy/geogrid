@@ -9,7 +9,7 @@ import pytest
 from playwright.sync_api import sync_playwright
 
 from app.fetchers.base import MAX_RESULTS
-from app.fetchers.playwright_maps import EXTRACT_JS, cards_to_results
+from app.fetchers.playwright_maps import EXTRACT_JS, FEED, cards_to_results
 
 FIXTURE = Path(__file__).parent / "fixtures" / "maps_results.html"
 
@@ -21,7 +21,7 @@ def cards():
         page = browser.new_page()
         page.route("**/*", lambda route: route.abort())  # offline: only the saved DOM matters
         page.set_content(FIXTURE.read_text(encoding="utf-8"), wait_until="domcontentloaded")
-        data = page.evaluate(EXTRACT_JS)
+        data = page.evaluate(EXTRACT_JS, FEED)
         browser.close()
     return data
 
