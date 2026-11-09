@@ -1,0 +1,63 @@
+
+name: GeoGrid - Testes Python
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - feature/metricas-zuri
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Validar Python e API
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest httpx
+
+      - name: Instalar Chromium para Playwright
+        run: |
+          python -m playwright install --with-deps chromium
+
+      - name: Verificar sintaxe
+        run: |
+          python -m compileall -q app
+
+      - name: Verificar imports e rota
+        run: |
+          python - <<'PY'
+          from app.main import app
+          from app.metrics import scan_metrics, point_difficulty
+
+          paths = [r.path for r in app.routes]
+
+          assert "/api/scans/{scan_id}/analysis" in paths
+          assert callable(scan_metrics)
+          assert callable(point_difficulty)
+
+          print("Imports e rota de analise OK")
+          PY
+
+      - name: Executar testes
+        run: |
+          python -m pytest -q tests
