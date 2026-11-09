@@ -150,7 +150,7 @@ def scan_analysis(scan_id: int, category: list[str] | None = None):
     points = []
     for p in scan["points"]:
         difficulty = (
-            point_difficulty(p["results"], category)
+            point_difficulty(p.get("results") or [], category)
             if p["status"] == "ok"
             else {
                 "ida": None,
@@ -183,5 +183,9 @@ def scan_analysis(scan_id: int, category: list[str] | None = None):
             if scores else None
         ),
         "ida_evaluated_points": len(scores),
+        "ida_coverage_pct": (
+    round(100 * len(scores) / len(valid), 1)
+    if valid else 0.0
+),
         "points": points
     }
