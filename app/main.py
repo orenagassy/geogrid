@@ -124,3 +124,64 @@ def remove_scan(scan_id: int):
         raise HTTPException(409, "scan is still running")
     db.delete_scan(scan_id)
     return {"deleted": scan_id}
+
+
+@app.get("/api/scans/{scan_id}/analysis")
+def scan_analysis(scan_id: int, category: list[str] | None = None):
+    from .metrics import scan_metrics, point_difficulty
+
+    scan = db.get_scan(scan_id)
+    if not scan:
+        raise HTTPException(404, "scan not found")
+
+    valid = [
+        p for p in scan["points"]
+        if p["status"] == "ok"
+    ]
+
+    metrics = scan_metrics([p["rank"] for p in valid])
+    total = len(scan["points"])
+    metrics["errors"] = total - len(valid)
+    metrics["coverage_pct"] = (
+        round(100 * len(valid) / total, 1)
+        if total else 0.0
+    )
+
+    points = []
+    for p in scan["points"]:
+        difficulty = (
+            point_difficulty(p["results"], category)
+            if p["status"] == "ok"
+            else {
+                "ida": None,
+                "level": "dados_insuficientes",
+                "reason": "erro_na_consulta"
+            }
+        )
+
+        points.append({
+            "row": p["row"],
+            "col": p["col"],
+            "lat": p["lat"],
+            "lng": p["lng"],
+            "rank": p["rank"],
+            "status": p["status"],
+            "difficulty": difficulty
+        })
+
+    scores = [
+        p["difficulty"]["ida"] for p in points
+        if p["difficulty"]["ida"] is not None
+    ]
+
+    return {
+        "scan_id": scan_id,
+        "keyword": scan["keyword"],
+        "metrics": metrics,
+        "ida_average": (
+            round(sum(scores) / len(scores), 1)
+            if scores else None
+        ),
+        "ida_evaluated_points": len(scores),
+        "points": points
+    }
