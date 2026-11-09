@@ -118,11 +118,18 @@ if not strengths:
         "relevant_count": len(relevant),
     }
 
-authority = sum(strengths) / len(strengths)
+    authority = sum(strengths) / len(strengths)
     top3_share = sum(1 for i, _ in relevant if i <= 3) / 3
+
     # This is an intensity proxy, NOT true market density or proximity.
     score = round(100 * (0.65 * authority + 0.35 * top3_share), 1)
-    return {'ida': score, 'level': 'facil' if score < 35 else 'medio' if score < 70 else 'dificil',
-            'confidence': 'experimental', 'sample_size': len(results),
-            'relevant_count': len(relevant), 'authority_proxy': round(authority, 3),
-            'top3_relevance': round(top3_share, 3)}
+
+    return {
+        'ida': score,
+        'level': 'facil' if score < 35 else 'medio' if score < 70 else 'dificil',
+        'confidence': 'experimental',
+        'sample_size': len(results),
+        'relevant_count': len(relevant),
+        'authority_proxy': round(authority, 3),
+        'top3_relevance': round(top3_share, 3),
+    }
