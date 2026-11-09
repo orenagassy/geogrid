@@ -35,6 +35,10 @@ jobs:
           pip install -r requirements.txt
           pip install pytest httpx
 
+      - name: Instalar Chromium para Playwright
+        run: |
+          python -m playwright install --with-deps chromium
+
       - name: Verificar sintaxe
         run: |
           python -m compileall -q app
