@@ -62,7 +62,6 @@ def competitor_leaderboard(points_results: list[list[dict]], limit: int = 20) ->
     board = []
     for info, rs in seen.values():
         m = scan_metrics(rs + [None] * (n - len(rs)))
-        del m['points']
         board.append({k: info.get(k) for k in ('name', 'cid', 'rating', 'reviews', 'category')} | m)
     board.sort(key=lambda b: (-b['solv'], b['atrp']))
     return board[:limit]
@@ -93,14 +92,33 @@ def point_difficulty(results: list[dict], category_terms: list[str] | None = Non
                 'reason': 'amostra_pequena', 'sample_size': len(results), 'relevant_count': len(relevant)}
     # Review strength capped logarithmically at 1000 reviews; rating contributes multiplicatively.
     strengths = []
-    for _, r in relevant:
-        try:
-            reviews = max(0, float(r.get('reviews') or 0))
-            rating = max(0, min(5, float(r.get('rating') or 0)))
-        except (TypeError, ValueError):
-            reviews, rating = 0, 0
-        strengths.append(min(1, math.log1p(reviews) / math.log1p(1000)) * rating / 5)
-    authority = sum(strengths) / len(strengths)
+
+for _, r in relevant:
+    try:
+        if r.get("reviews") is None or r.get("rating") is None:
+            continue
+
+        reviews = max(0, float(r["reviews"]))
+        rating = max(0, min(5, float(r["rating"])))
+
+        strengths.append(
+            min(1, math.log1p(reviews) / math.log1p(1000))
+            * rating / 5
+        )
+    except (TypeError, ValueError):
+        continue
+
+if not strengths:
+    return {
+        "ida": None,
+        "level": "dados_insuficientes",
+        "confidence": "low",
+        "reason": "avaliacoes_indisponiveis",
+        "sample_size": len(results),
+        "relevant_count": len(relevant),
+    }
+
+authority = sum(strengths) / len(strengths)
     top3_share = sum(1 for i, _ in relevant if i <= 3) / 3
     # This is an intensity proxy, NOT true market density or proximity.
     score = round(100 * (0.65 * authority + 0.35 * top3_share), 1)
