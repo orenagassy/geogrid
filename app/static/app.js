@@ -363,13 +363,61 @@ updateHint();
 loadBusinesses().catch((e) => say("#bizMsg", "err", e.message));
 
 // ZURI_PANEL_V1: read-only analysis API, never launches a scan.
+
 function zuriCategoryTerms() {
-  const cat = (S.business?.category || "").toLowerCase();
-  if (cat.includes("advertis") || cat.includes("market") || cat.includes("publicidade")) {
-    return ["Marketing agency", "Advertising agency", "Internet marketing service", "Agência de marketing", "Agência de publicidade"];
+  const normalize = (value) =>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+
+  const keyword = normalize(S.scan?.keyword);
+  const businessCategory = S.business?.category || "";
+
+  const groups = [
+    {
+      terms: [
+        "stand", "estande", "cenografia",
+        "feira", "exposicao", "exhibition",
+        "montadora de stands"
+      ],
+      categories: [
+        "Exhibition",
+        "Stand",
+        "Event",
+        "Trade show",
+        "Cenografia",
+        "Exhibition stand contractor",
+        "Event management company"
+      ]
+    },
+    {
+      terms: [
+        "marketing", "publicidade",
+        "agencia de propaganda",
+        "trafego pago", "seo",
+        "marketing digital"
+      ],
+      categories: [
+        "Marketing agency",
+        "Advertising agency",
+        "Internet marketing service",
+        "Agência de marketing",
+        "Agência de publicidade"
+      ]
+    }
+  ];
+
+  for (const group of groups) {
+    if (group.terms.some(term => keyword.includes(term))) {
+      return group.categories;
+    }
   }
-  return S.business?.category ? [S.business.category] : [];
+
+  return businessCategory ? [businessCategory] : [];
 }
+
 async function loadZuriAnalysis(id) {
   try {
     const params = new URLSearchParams();
