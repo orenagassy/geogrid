@@ -14,7 +14,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -190,9 +190,10 @@ async def add_business(body: BusinessIn):
 # Scans API
 # --------------------------------------------------
 
-@app.get("/api/scans")
-def scans(
-    business_id: int | None = None,
+@app.get("/api/scans/{scan_id}/analysis")
+def scan_analysis(
+    scan_id: int,
+    category: list[str] | None = Query(default=None),
 ):
     """List scans, optionally filtered by business."""
 
