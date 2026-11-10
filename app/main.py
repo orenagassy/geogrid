@@ -189,7 +189,10 @@ async def add_business(body: BusinessIn):
 # --------------------------------------------------
 # Scans API
 # --------------------------------------------------
-
+@app.get("/api/scans")
+def scans(business_id: int | None = None):
+    """List scans, optionally filtered by business."""
+    return db.list_scans(business_id)
 
 
 async def _run_queued(
