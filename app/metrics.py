@@ -238,189 +238,69 @@ def point_difficulty(
     *,
     min_results: int = 5,
 ) -> dict:
-    """Calculate an experimental local competition difficulty score.
+    """IDA experimental adaptativo, calculado somente com evidências observadas.
 
-    The score is based on:
-    - Review strength of relevant competitors.
-    - Google rating of relevant competitors.
-    - Concentration of relevant businesses in the top 3.
-
-    Important:
-    - This is an experimental competition intensity proxy.
-    - It does not measure total market density.
-    - It does not measure actual geographic proximity.
-    - It is not the proprietary Localo difficulty metric.
+    Amostra robusta: >= min_results resultados e >= 3 concorrentes relevantes.
+    Amostra moderada: >= 2 resultados e >= 2 relevantes com avaliações.
+    Amostras menores não recebem pontuação; nunca inferir concorrentes ausentes.
+    A fórmula é mantida para preservar a comparabilidade com o IDA anterior.
     """
-
-    # --------------------------------------------------
-    # 1. Validate results
-    # --------------------------------------------------
-
+    # IDA_ADAPTATIVO_ZURI_V2
     if not isinstance(results, list):
-        return {
-            "ida": None,
-            "level": "dados_insuficientes",
-            "confidence": "low",
-            "reason": "resultados_invalidos",
-        }
-
-    # --------------------------------------------------
-    # 2. Validate category configuration
-    # --------------------------------------------------
-
+        return {"ida": None, "level": "dados_insuficientes", "confidence": "low", "reason": "resultados_invalidos"}
     if not category_terms:
-        return {
-            "ida": None,
-            "level": "dados_insuficientes",
-            "confidence": "low",
-            "reason": "categorias_nao_configuradas",
-            "sample_size": len(results),
-        }
-
-    # --------------------------------------------------
-    # 3. Filter relevant competitors
-    # --------------------------------------------------
+        return {"ida": None, "level": "dados_insuficientes", "confidence": "low", "reason": "categorias_nao_configuradas", "sample_size": len(results)}
 
     relevant = [
         (index, result)
         for index, result in enumerate(results, 1)
-        if (
-            isinstance(result, dict)
-            and _relevant(result, category_terms)
-        )
+        if isinstance(result, dict) and _relevant(result, category_terms)
     ]
-
-    # --------------------------------------------------
-    # 4. Validate sample size
-    # --------------------------------------------------
-
-    if (
-        len(results) < min_results
-        or len(relevant) < 3
-    ):
+    sample_size = len(results)
+    relevant_count = len(relevant)
+    robust = sample_size >= min_results and relevant_count >= 3
+    moderate = sample_size >= 2 and relevant_count >= 2
+    if not (robust or moderate):
         return {
-            "ida": None,
-            "level": "dados_insuficientes",
-            "confidence": "low",
-            "reason": "amostra_pequena",
-            "sample_size": len(results),
-            "relevant_count": len(relevant),
+            "ida": None, "level": "dados_insuficientes", "confidence": "low",
+            "reason": "amostra_pequena", "sample_size": sample_size,
+            "relevant_count": relevant_count,
         }
-
-    # --------------------------------------------------
-    # 5. Calculate review strength
-    # --------------------------------------------------
 
     strengths = []
-
     for _, result in relevant:
-
         try:
-            if (
-                result.get("reviews") is None
-                or result.get("rating") is None
-            ):
+            if result.get("reviews") is None or result.get("rating") is None:
                 continue
-
-            reviews = max(
-                0,
-                float(result["reviews"]),
-            )
-
-            rating = max(
-                0,
-                min(
-                    5,
-                    float(result["rating"]),
-                ),
-            )
-
-            review_strength = min(
-                1,
-                math.log1p(reviews) / math.log1p(1000),
-            )
-
-            strength = (
-                review_strength * rating / 5
-            )
-
-            if not math.isfinite(strength):
+            reviews = float(result["reviews"])
+            rating = float(result["rating"])
+            if not (math.isfinite(reviews) and math.isfinite(rating)):
                 continue
-
-            strengths.append(strength)
-
+            reviews = max(0.0, reviews)
+            rating = max(0.0, min(5.0, rating))
+            review_strength = min(1.0, math.log1p(reviews) / math.log1p(1000))
+            strengths.append(review_strength * rating / 5)
         except (TypeError, ValueError, OverflowError):
             continue
-
-    # --------------------------------------------------
-    # 6. Validate available review data
-    # --------------------------------------------------
-
-    if not strengths:
+    # Para amostra moderada, exigir dados de avaliação de ambos os concorrentes.
+    minimum_strengths = 1 if robust else 2
+    if len(strengths) < minimum_strengths:
         return {
-            "ida": None,
-            "level": "dados_insuficientes",
-            "confidence": "low",
-            "reason": "avaliacoes_indisponiveis",
-            "sample_size": len(results),
-            "relevant_count": len(relevant),
+            "ida": None, "level": "dados_insuficientes", "confidence": "low",
+            "reason": "avaliacoes_indisponiveis", "sample_size": sample_size,
+            "relevant_count": relevant_count, "review_sample_size": len(strengths),
         }
 
-    # --------------------------------------------------
-    # 7. Calculate competitor authority proxy
-    # --------------------------------------------------
-
-    authority = (
-        sum(strengths) / len(strengths)
-    )
-
-    # --------------------------------------------------
-    # 8. Calculate top-three relevance
-    # --------------------------------------------------
-
-    top3_share = (
-        sum(
-            1
-            for index, _ in relevant
-            if index <= 3
-        ) / 3
-    )
-
-    # --------------------------------------------------
-    # 9. Calculate experimental IDA
-    # --------------------------------------------------
-
-    score = round(
-        100 * (
-            0.65 * authority
-            + 0.35 * top3_share
-        ),
-        1,
-    )
-
-    # --------------------------------------------------
-    # 10. Classify difficulty
-    # --------------------------------------------------
-
-    if score < 35:
-        level = "facil"
-
-    elif score < 70:
-        level = "medio"
-
-    else:
-        level = "dificil"
-
-    # --------------------------------------------------
-    # 11. Return analysis
-    # --------------------------------------------------
-
+    authority = sum(strengths) / len(strengths)
+    top3_share = sum(1 for index, _ in relevant if index <= 3) / 3
+    score = round(100 * (0.65 * authority + 0.35 * top3_share), 1)
+    level = "facil" if score < 35 else "medio" if score < 70 else "dificil"
     return {
-        "ida": score,
-        "level": level,
-        "confidence": "experimental",
-        "sample_size": len(results),
-        "relevant_count": len(relevant),
+        "ida": score, "level": level,
+        "confidence": "experimental" if robust else "moderate",
+        "sample_size": sample_size, "relevant_count": relevant_count,
+        "review_sample_size": len(strengths),
         "authority_proxy": round(authority, 3),
         "top3_relevance": round(top3_share, 3),
+        "method": "full" if robust else "adaptive_small_sample",
     }
