@@ -389,7 +389,10 @@ function zuriCategoryTerms() {
         "Trade show",
         "Cenografia",
         "Exhibition stand contractor",
-        "Event management company"
+        "Event management company",
+        "Trade fair construction company",
+        "Scenography company",
+        "Stall installation service"
       ]
     },
     {
