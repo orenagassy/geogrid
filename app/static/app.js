@@ -6,7 +6,7 @@ const NOT_FOUND = 21;
 
 const S = {
   businesses: [], business: null, scans: [], scan: null,
-  center: null, mode: "rank", competitor: null, pollTimer: null,
+  center: null, mode: "rank", competitor: null, pollTimer: null, analysis: null, analysisScanId: null,
 };
 
 // ---------- map ----------
@@ -197,8 +197,10 @@ async function openScan(id, { keepView = false } = {}) {
   const scan = await api(`/api/scans/${id}`);
   const switched = !S.scan || S.scan.id !== id;
   S.scan = scan;
+  if (switched) { S.analysis = null; S.analysisScanId = null; }
   if (switched && !keepView) { S.competitor = null; S.mode = "rank"; }
   renderScan(switched);
+  if (scan.status === "done" && (switched || !S.analysis)) loadZuriAnalysis(id);
   document.querySelectorAll("#history li.item").forEach((li) => li.classList.toggle("active", +li.dataset.id === id));
   stopPolling();
   if (scan.status === "running") S.pollTimer = setTimeout(async () => { await loadHistory(); openScan(id, { keepView: true }); }, 2500);
@@ -206,7 +208,7 @@ async function openScan(id, { keepView = false } = {}) {
 }
 function stopPolling() { clearTimeout(S.pollTimer); S.pollTimer = null; }
 function closeScan() {
-  stopPolling(); S.scan = null; S.competitor = null;
+  stopPolling(); S.scan = null; S.competitor = null; S.analysis = null; S.analysisScanId = null;
   $("#scanCard").classList.add("hidden"); $("#compCard").classList.add("hidden");
   document.querySelectorAll("#history li.item").forEach((li) => li.classList.remove("active"));
 }
@@ -226,10 +228,16 @@ function renderScan(fit) {
   } else prog.classList.add("hidden");
 
   renderMetrics();
+  const info = $("#analysisInfo");
+  info.textContent = S.analysis ? `IDA experimental · ${S.analysis.ida_evaluated_points ?? 0} pontos avaliados · ${fmt(S.analysis.ida_coverage_pct, "%")} de cobertura` : (s.status === "done" ? "Carregando análise IVL/IDA…" : "");
   const cmp = s.comparison;
   $("#deltaBtn").disabled = !cmp;
   $("#deltaBtn").title = cmp ? `Compared with ${when(cmp.previous_created)}` : "Needs an earlier scan with the same keyword and grid";
   if (!cmp && S.mode === "delta") S.mode = "rank";
+  if (S.mode === "difficulty" && !S.analysis) S.mode = "rank";
+  $("#difficultyBtn").disabled = !S.analysis || !!S.competitor;
+  $("#rankLegend").classList.toggle("hidden", S.mode === "difficulty");
+  $("#difficultyLegend").classList.toggle("hidden", S.mode !== "difficulty");
   document.querySelectorAll("#viewToggle button").forEach((b) => b.classList.toggle("on", b.dataset.mode === S.mode));
   $("#viewing").innerHTML = S.competitor
     ? `<span class="chip">Showing: <b>${esc(S.competitor.name)}</b> <a href="#" id="clearComp">✕ back to my business</a></span>` : "";
@@ -259,6 +267,8 @@ function renderMetrics() {
     ["ATRP", fmt(m.atrp), "avg rank, 20+ = 21", delta("atrp", true)],
     ["SoLV", fmt(m.solv, "%"), "points in top 3", delta("solv", false)],
     ["Found", fmt(m.found_pct, "%"), "points in top 20", delta("found_pct", false)],
+    ["IVL", S.competitor ? "–" : fmt(S.analysis?.metrics?.ivl, "%"), "Indice de visibilidade local (pontos validos)", ""],
+    ["IDA", S.competitor ? "–" : fmt(S.analysis?.ida_average), "Indice experimental de dificuldade (0 a 100)", ""],
   ].map(([l, v, title, dl]) => `<div class="metric" title="${title}"><div class="l">${l}</div><div class="v">${v}</div>${dl}</div>`).join("");
 }
 
@@ -299,7 +309,12 @@ function drawScanGrid() {
     else if (p.status !== "ok") { cls = "rx"; label = "!"; }
     else {
       const rank = S.competitor ? rankIn(p.results, key) : p.rank;
-      if (S.mode === "delta" && s.comparison) {
+      if (S.mode === "difficulty" && S.analysis && !S.competitor) {
+        const a = (S.analysis.points || []).find((x) => x.row === row && x.col === col);
+        const ida = a?.difficulty?.ida;
+        if (ida === null || ida === undefined) { cls = "ida-missing"; label = "?"; }
+        else { cls = ida < 35 ? "ida-easy" : ida < 70 ? "ida-medium" : "ida-hard"; label = String(Math.round(ida)); }
+      } else if (S.mode === "delta" && s.comparison) {
         const prevRaw = s.comparison.points[`${row},${col}`];
         if (prevRaw === undefined) { cls = "same"; label = "?"; }
         else {
@@ -318,14 +333,17 @@ function drawScanGrid() {
 function popupHtml(p, key) {
   if (p.status !== "ok") return `<div class="popup"><h4>Point not scanned</h4><div class="muted">${esc(p.error)}</div></div>`;
   const rank = rankIn(p.results, key) ?? (S.competitor ? null : p.rank);
+  const a = S.analysis?.points?.find((x) => x.row === p.row && x.col === p.col);
+  const ida = a?.difficulty?.ida;
+  const difficultyText = ida == null ? "IDA: dados insuficientes" : `IDA experimental: ${ida} / 100 (${esc(a.difficulty.level)})`;
   const items = p.results.map((r) => `<li class="${sameBiz(r, key) ? "hit" : ""}">${esc(r.name)}${r.rating ? ` <span class="muted">★${r.rating}</span>` : ""}</li>`).join("");
   return `<div class="popup"><h4>${esc(key.name)}: ${rank ? "#" + rank : "not in top 20"}</h4>
-    <div class="muted">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div><ol>${items || "<li class='muted'>No results</li>"}</ol></div>`;
+    <div class="muted">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div><div>${difficultyText}</div><ol>${items || "<li class='muted'>No results</li>"}</ol></div>`;
 }
 
 document.querySelectorAll("#viewToggle button").forEach((b) => b.addEventListener("click", () => {
   if (b.disabled) return;
-  S.mode = b.dataset.mode; if (S.mode === "delta") S.competitor = null;
+  S.mode = b.dataset.mode; if (S.mode === "delta" || S.mode === "difficulty") S.competitor = null;
   renderScan(false);
 }));
 
@@ -343,3 +361,27 @@ function localSet(k, v) { try { localStorage.setItem("geogrid." + k, v); } catch
 
 updateHint();
 loadBusinesses().catch((e) => say("#bizMsg", "err", e.message));
+
+// ZURI_PANEL_V1: read-only analysis API, never launches a scan.
+function zuriCategoryTerms() {
+  const cat = (S.business?.category || "").toLowerCase();
+  if (cat.includes("advertis") || cat.includes("market") || cat.includes("publicidade")) {
+    return ["Marketing agency", "Advertising agency", "Internet marketing service", "Agência de marketing", "Agência de publicidade"];
+  }
+  return S.business?.category ? [S.business.category] : [];
+}
+async function loadZuriAnalysis(id) {
+  try {
+    const params = new URLSearchParams();
+    zuriCategoryTerms().forEach((term) => params.append("category", term));
+    const query = params.toString();
+    const analysis = await api(`/api/scans/${id}/analysis${query ? "?" + query : ""}`);
+    if (!S.scan || S.scan.id !== id) return;
+    S.analysis = analysis;
+    S.analysisScanId = id;
+    renderScan(false);
+  } catch (err) {
+    if (!S.scan || S.scan.id !== id) return;
+    $("#analysisInfo").textContent = `Análise IVL/IDA indisponível: ${err.message}`;
+  }
+}

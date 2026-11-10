@@ -117,3 +117,14 @@ tr.sel td { background: #fef3c7; }
   .card { box-shadow: none; border: 1px solid var(--line); }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* ZURI_PANEL_V1: indicadores e mapa de dificuldade */
+#scanCard { width: min(520px, calc(100% - 24px)); }
+#metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#metrics .metric .v { font-size: 19px; }
+#analysisInfo { margin: 4px 0 8px; }
+.pin.ida-easy, .sw.ida-easy { background: #16a34a; }
+.pin.ida-medium, .sw.ida-medium { background: #eab308; color: #302500; }
+.pin.ida-hard, .sw.ida-hard { background: #dc2626; }
+.pin.ida-missing { background: #9ca3af; }
+@media (max-width: 800px) { #scanCard { width: calc(100% - 24px); } }

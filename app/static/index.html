@@ -73,8 +73,10 @@
     <div id="metrics" class="metrics"></div>
     <div class="toggle" id="viewToggle">
       <button data-mode="rank" class="on">Ranks</button>
+      <button data-mode="difficulty" id="difficultyBtn" title="Dificuldade experimental da area">Dificuldade</button>
       <button data-mode="delta" id="deltaBtn" disabled title="Needs an earlier scan with the same keyword and grid">Change vs previous</button>
     </div>
+    <div id="analysisInfo" class="small muted"></div>
     <div id="viewing" class="small"></div>
   </div>
 
@@ -91,9 +93,15 @@
     </div>
   </div>
 
-  <div class="legend card">
+  <div class="legend card" id="rankLegend">
     <span><i class="sw r1"></i>1–3</span><span><i class="sw r2"></i>4–10</span>
     <span><i class="sw r3"></i>11–20</span><span><i class="sw r4"></i>20+</span><span><i class="sw rx"></i>error</span>
+  </div>
+  <div class="legend card hidden" id="difficultyLegend">
+    <span><i class="sw ida-easy"></i>0–34,9</span>
+    <span><i class="sw ida-medium"></i>35–69,9</span>
+    <span><i class="sw ida-hard"></i>70–100</span>
+    <span><i class="sw rx"></i>sem dados/erro</span>
   </div>
 </main>
 
