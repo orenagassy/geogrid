@@ -13,20 +13,32 @@ def normalize_name(name: str) -> str:
 
 
 def find_rank(results: list[dict], target: dict) -> int | None:
-    """Return the target rank, preferring CID, Place ID, then exact normalized name."""
-    cid = target.get("cid")
-    if cid:
-        for i, r in enumerate(results, 1):
-            if r.get("cid") == cid:
-                return i
-    place_id = target.get("place_id")
-    if place_id:
-        for i, r in enumerate(results, 1):
-            if r.get("place_id") == place_id:
-                return i
-    want = normalize_name(target.get("name", ""))
-    if want:
-        for i, r in enumerate(results, 1):
-            if normalize_name(r.get("name", "")) == want:
-                return i
+    """Find target rank without accepting conflicting official identifiers."""
+    target_cid = str(target.get("cid") or "").strip()
+    target_place = str(target.get("place_id") or "").strip()
+    target_name = normalize_name(target.get("name") or "")
+
+    def matches(result):
+        cid = str(result.get("cid") or "").strip()
+        place = str(result.get("place_id") or "").strip()
+
+        if target_cid and cid and target_cid != cid:
+            return False
+        if target_place and place and target_place != place:
+            return False
+
+        if target_cid and cid == target_cid:
+            return True
+        if target_place and place == target_place:
+            return True
+
+        return (
+            bool(target_name)
+            and normalize_name(result.get("name") or "") == target_name
+        )
+
+    for position, result in enumerate(results, 1):
+        if isinstance(result, dict) and matches(result):
+            return position
+
     return None
