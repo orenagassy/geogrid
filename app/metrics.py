@@ -195,6 +195,7 @@ def competitor_leaderboard(
             for key in (
                 "name",
                 "cid",
+                "place_id",
                 "rating",
                 "reviews",
                 "category",
@@ -237,68 +238,166 @@ def point_difficulty(
     category_terms: list[str] | None = None,
     *,
     min_results: int = 5,
+    target: dict | None = None,
 ) -> dict:
-    """IDA experimental adaptativo, calculado somente com evidências observadas.
+    """Return a descriptive, experimental competition-difficulty proxy.
 
-    Amostra robusta: >= min_results resultados e >= 3 concorrentes relevantes.
-    Amostra moderada: >= 2 resultados e >= 2 relevantes com avaliações.
-    Amostras menores não recebem pontuação; nunca inferir concorrentes ausentes.
-    A fórmula é mantida para preservar a comparabilidade com o IDA anterior.
+    The existing full and small-sample paths are retained for compatibility.
+    No statistical confidence is estimated. When a target with official IDs is
+    provided, it and identity conflicts are excluded before the score is built.
     """
-    # IDA_ADAPTATIVO_ZURI_V2
+    from app.competitor_identity import (
+        reconcile_business_identities,
+        safe_target_decision,
+    )
+
+    base = {
+        "ida": None,
+        "level": "dados_insuficientes",
+        "confidence": "not_estimated",
+        "evidence": "insufficient",
+    }
+
     if not isinstance(results, list):
-        return {"ida": None, "level": "dados_insuficientes", "confidence": "low", "reason": "resultados_invalidos"}
-    if not category_terms:
-        return {"ida": None, "level": "dados_insuficientes", "confidence": "low", "reason": "categorias_nao_configuradas", "sample_size": len(results)}
+        return {**base, "reason": "resultados_invalidos"}
+
+    terms = [
+        term.strip()
+        for term in category_terms or []
+        if isinstance(term, str) and term.strip()
+    ]
+    if not terms:
+        return {
+            **base,
+            "reason": "categorias_nao_configuradas",
+            "sample_size": 0,
+        }
+
+    if isinstance(min_results, bool) or not isinstance(min_results, int) or min_results < 1:
+        return {**base, "reason": "min_results_invalido"}
+
+    valid_results = [
+        (position, result)
+        for position, result in enumerate(results, 1)
+        if isinstance(result, dict)
+    ]
+
+    target_has_id = isinstance(target, dict) and any(
+        target.get(key)
+        for key in ("business_cid", "cid", "business_place_id", "place_id")
+    )
+    if target is not None and not target_has_id:
+        return {**base, "reason": "target_identity_unavailable"}
+
+    excluded_target = 0
+    conflicting_identities = 0
+    unresolved_identities = 0
+
+    identities = reconcile_business_identities(
+        [result for _, result in valid_results]
+    )["records"]
+    eligible = []
+    for (position, result), identity in zip(valid_results, identities):
+        if identity["status"] == "conflict":
+            conflicting_identities += 1
+            continue
+        if identity["status"] != "identified" or not identity.get("key"):
+            if target_has_id:
+                unresolved_identities += 1
+                continue
+            eligible.append((position, result, None))
+            continue
+
+        if target_has_id:
+            decision = safe_target_decision(result, target, identity)
+            if decision["is_target"] is True:
+                excluded_target += 1
+                continue
+            if decision["is_target"] is None:
+                unresolved_identities += 1
+                continue
+        eligible.append((position, result, identity["key"]))
+
+    # Deduplicate only by official IDs. A name alone is not proof of identity.
+    unique = []
+    seen = set()
+    for position, result, key in eligible:
+        if key is not None and key in seen:
+            continue
+        if key is not None:
+            seen.add(key)
+        unique.append((position, result))
 
     relevant = [
-        (index, result)
-        for index, result in enumerate(results, 1)
-        if isinstance(result, dict) and _relevant(result, category_terms)
+        (position, result)
+        for position, result in unique
+        if _relevant(result, terms)
     ]
-    sample_size = len(results)
+    sample_size = len(unique)
     relevant_count = len(relevant)
     robust = sample_size >= min_results and relevant_count >= 3
     moderate = sample_size >= 2 and relevant_count >= 2
+    metadata = {
+        "sample_size": sample_size,
+        "relevant_count": relevant_count,
+        "excluded_target_occurrences": excluded_target,
+        "conflicting_identity_occurrences": conflicting_identities,
+        "unresolved_identity_occurrences": unresolved_identities,
+    }
+
     if not (robust or moderate):
         return {
-            "ida": None, "level": "dados_insuficientes", "confidence": "low",
-            "reason": "amostra_pequena", "sample_size": sample_size,
-            "relevant_count": relevant_count,
+            **base,
+            **metadata,
+            "reason": "amostra_pequena",
         }
 
     strengths = []
-    for _, result in relevant:
+    scored_relevant = []
+    for position, result in relevant:
         try:
             if result.get("reviews") is None or result.get("rating") is None:
                 continue
             reviews = float(result["reviews"])
             rating = float(result["rating"])
-            if not (math.isfinite(reviews) and math.isfinite(rating)):
+            if (
+                not math.isfinite(reviews)
+                or not math.isfinite(rating)
+                or reviews < 0
+                or not reviews.is_integer()
+                or not 1 <= rating <= 5
+            ):
                 continue
-            reviews = max(0.0, reviews)
-            rating = max(0.0, min(5.0, rating))
-            review_strength = min(1.0, math.log1p(reviews) / math.log1p(1000))
+            review_strength = min(
+                1.0,
+                math.log1p(reviews) / math.log1p(1000),
+            )
             strengths.append(review_strength * rating / 5)
+            scored_relevant.append(position)
         except (TypeError, ValueError, OverflowError):
             continue
-    # Para amostra moderada, exigir dados de avaliação de ambos os concorrentes.
+
     minimum_strengths = 1 if robust else 2
     if len(strengths) < minimum_strengths:
         return {
-            "ida": None, "level": "dados_insuficientes", "confidence": "low",
-            "reason": "avaliacoes_indisponiveis", "sample_size": sample_size,
-            "relevant_count": relevant_count, "review_sample_size": len(strengths),
+            **base,
+            **metadata,
+            "reason": "avaliacoes_indisponiveis",
+            "review_sample_size": len(strengths),
         }
 
     authority = sum(strengths) / len(strengths)
-    top3_share = sum(1 for index, _ in relevant if index <= 3) / 3
+    top3_share = sum(position <= 3 for position in scored_relevant) / 3
     score = round(100 * (0.65 * authority + 0.35 * top3_share), 1)
     level = "facil" if score < 35 else "medio" if score < 70 else "dificil"
+
     return {
-        "ida": score, "level": level,
-        "confidence": "experimental" if robust else "moderate",
-        "sample_size": sample_size, "relevant_count": relevant_count,
+        **base,
+        **metadata,
+        "ida": score,
+        "level": level,
+        "evidence": "descriptive",
+        "reason": None,
         "review_sample_size": len(strengths),
         "authority_proxy": round(authority, 3),
         "top3_relevance": round(top3_share, 3),

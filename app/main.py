@@ -20,6 +20,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import db
+from .competitive_metrics import (
+    classify_competitors,
+    keyword_competition_v2,
+    position_opportunity,
+    target_brand_confidence,
+)
 from .fetchers.base import FetchError
 from .metrics import point_difficulty, scan_metrics
 from .scan import compare, create_scans, make_fetcher, run_scan
@@ -339,22 +345,23 @@ def remove_scan(
 
 
 # --------------------------------------------------
-# GeoGrid ZURI - IVL and IDA analysis
+# GeoGrid ZURI - scan analysis
 # --------------------------------------------------
 
 @app.get("/api/scans/{scan_id}/analysis")
 def scan_analysis(
     scan_id: int,
     category: list[str] | None = Query(default=None),
+    related_category: list[str] | None = Query(default=None),
 ):
-    """Return local visibility and competition analysis.
+    """Return local visibility and experimental competitive indicators.
 
     Metrics:
         ARP: Average Rank Position.
         ATRP: Average Total Rank Position.
         SoLV: Share of Local Voice.
         IVL: Local Visibility Index.
-        IDA: Experimental Area Difficulty Index.
+        ICM, ICP-B V2, ICE, IOP and IDA: experimental/descriptive indicators.
 
     Failed scan points are excluded from ranking metrics.
     """
@@ -372,6 +379,14 @@ def scan_analysis(
         )
 
     scan_points = scan.get("points") or []
+    target = {
+        "business_cid": scan.get("business_cid"),
+        "business_place_id": scan.get("business_place_id"),
+    }
+    target_category = scan.get("business_category")
+    category_terms = category or (
+        [target_category] if target_category else []
+    )
 
     # ----------------------------------------------
     # 2. Filter successfully scanned points
@@ -422,7 +437,8 @@ def scan_analysis(
 
             difficulty = point_difficulty(
                 point.get("results") or [],
-                category,
+                category_terms,
+                target=target,
             )
 
         else:
@@ -430,7 +446,8 @@ def scan_analysis(
             difficulty = {
                 "ida": None,
                 "level": "dados_insuficientes",
-                "confidence": "low",
+                "confidence": "not_estimated",
+                "evidence": "insufficient",
                 "reason": "erro_na_consulta",
             }
 
@@ -483,13 +500,36 @@ def scan_analysis(
     )
 
     # ----------------------------------------------
-    # 8. Return complete analysis
+    # 8. Calculate observed brand and competition indicators
+    # ----------------------------------------------
+
+    icm = target_brand_confidence(scan_points, target)
+    icpb_v2 = keyword_competition_v2(
+        scan_points,
+        target=target,
+    )
+    ice = classify_competitors(
+        scan_points,
+        target=target,
+        target_category=target_category,
+        keyword=scan.get("keyword"),
+        related_categories=related_category,
+    )
+    iop = position_opportunity(scan_points, icpb_v2)
+
+    # ----------------------------------------------
+    # 9. Return complete analysis
     # ----------------------------------------------
 
     return {
         "scan_id": scan_id,
         "keyword": scan.get("keyword"),
+        "target_category": target_category,
         "metrics": metrics,
+        "icm": icm,
+        "icpb_v2": icpb_v2,
+        "ice": ice,
+        "iop": iop,
         "ida_average": ida_average,
         "ida_evaluated_points": len(scores),
         "ida_coverage_pct": ida_coverage_pct,

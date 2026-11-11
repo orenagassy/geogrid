@@ -127,4 +127,6 @@ tr.sel td { background: #fef3c7; }
 .pin.ida-medium, .sw.ida-medium { background: #eab308; color: #302500; }
 .pin.ida-hard, .sw.ida-hard { background: #dc2626; }
 .pin.ida-missing { background: #9ca3af; }
+.pin.iop { background: hsl(var(--iop-hue) 65% 38%); }
+.sw.iop { background: linear-gradient(90deg, #dc2626, #eab308, #16a34a); }
 @media (max-width: 800px) { #scanCard { width: calc(100% - 24px); } }

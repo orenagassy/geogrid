@@ -74,6 +74,7 @@
     <div class="toggle" id="viewToggle">
       <button data-mode="rank" class="on">Ranks</button>
       <button data-mode="difficulty" id="difficultyBtn" title="Dificuldade experimental da area">Dificuldade</button>
+      <button data-mode="opportunity" id="opportunityBtn" title="IOP experimental não validado; não é previsão">Oportunidade</button>
       <button data-mode="delta" id="deltaBtn" disabled title="Needs an earlier scan with the same keyword and grid">Change vs previous</button>
     </div>
     <div id="analysisInfo" class="small muted"></div>
@@ -101,6 +102,10 @@
     <span><i class="sw ida-easy"></i>0–34,9</span>
     <span><i class="sw ida-medium"></i>35–69,9</span>
     <span><i class="sw ida-hard"></i>70–100</span>
+    <span><i class="sw rx"></i>sem dados/erro</span>
+  </div>
+  <div class="legend card hidden" id="opportunityLegend">
+    <span><i class="sw iop"></i>IOP experimental: menor → maior oportunidade</span>
     <span><i class="sw rx"></i>sem dados/erro</span>
   </div>
 </main>

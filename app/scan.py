@@ -42,7 +42,11 @@ def create_scans(biz: dict, keywords: list[str], grid_size: int, spacing_km: flo
 
 async def run_scan(scan_id: int, fetcher: Fetcher, concurrency: int | None = None) -> None:
     scan = db.get_scan(scan_id, with_points=False)
-    target = {"cid": scan["business_cid"], "name": scan["business_name"]}
+    target = {
+        "cid": scan["business_cid"],
+        "place_id": scan.get("business_place_id"),
+        "name": scan["business_name"],
+    }
     grid = make_grid(scan["center_lat"], scan["center_lng"], scan["grid_size"], scan["spacing_km"])
     sem = asyncio.Semaphore(concurrency or default_concurrency())
     abort = asyncio.Event()

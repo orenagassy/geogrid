@@ -13,11 +13,16 @@ def normalize_name(name: str) -> str:
 
 
 def find_rank(results: list[dict], target: dict) -> int | None:
-    """1-based rank of target in results, or None. Matches on CID first, then exact normalized name."""
+    """Return the target rank, preferring CID, Place ID, then exact normalized name."""
     cid = target.get("cid")
     if cid:
         for i, r in enumerate(results, 1):
             if r.get("cid") == cid:
+                return i
+    place_id = target.get("place_id")
+    if place_id:
+        for i, r in enumerate(results, 1):
+            if r.get("place_id") == place_id:
                 return i
     want = normalize_name(target.get("name", ""))
     if want:

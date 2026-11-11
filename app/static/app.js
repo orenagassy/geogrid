@@ -58,12 +58,20 @@ function rankClass(rank) {
   if (rank === null || rank === undefined) return "r4";
   return rank <= 3 ? "r1" : rank <= 10 ? "r2" : rank <= 20 ? "r3" : "r4";
 }
-function sameBiz(r, key) { return key.cid ? r.cid === key.cid : (r.name || "").toLowerCase() === key.name.toLowerCase(); }
+function sameBiz(r, key) {
+  if (key.cid && r.cid) return r.cid === key.cid;
+  if (key.place_id && r.place_id) return r.place_id === key.place_id;
+  return (r.name || "").toLowerCase() === (key.name || "").toLowerCase();
+}
 function rankIn(results, key) {
   const i = (results || []).findIndex((r) => sameBiz(r, key));
   return i === -1 ? null : i + 1;
 }
-const myKey = () => ({ cid: S.scan.business_cid, name: S.scan.business_name });
+const myKey = () => ({
+  cid: S.scan.business_cid,
+  place_id: S.scan.business_place_id,
+  name: S.scan.business_name,
+});
 const targetKey = () => S.competitor || myKey();
 
 // ---------- businesses ----------
@@ -229,15 +237,27 @@ function renderScan(fit) {
 
   renderMetrics();
   const info = $("#analysisInfo");
-  info.textContent = S.analysis ? `IDA experimental · ${S.analysis.ida_evaluated_points ?? 0} pontos avaliados · ${fmt(S.analysis.ida_coverage_pct, "%")} de cobertura` : (s.status === "done" ? "Carregando análise IVL/IDA…" : "");
+  if (S.analysis) {
+    const ice = S.analysis.ice?.counts || {};
+    info.textContent = [
+      `IDA: ${S.analysis.ida_evaluated_points ?? 0} pontos · ${fmt(S.analysis.ida_coverage_pct, "%")} cobertura`,
+      `ICE: ${ice.direct ?? 0} diretos, ${ice.indirect ?? 0} indiretos, ${ice.keyword_only ?? 0} por palavra-chave, ${ice.indeterminate ?? 0} indeterminados`,
+      "IOP: protótipo experimental não validado",
+    ].join(" · ");
+  } else {
+    info.textContent = s.status === "done" ? "Carregando análise de indicadores…" : "";
+  }
   const cmp = s.comparison;
   $("#deltaBtn").disabled = !cmp;
   $("#deltaBtn").title = cmp ? `Compared with ${when(cmp.previous_created)}` : "Needs an earlier scan with the same keyword and grid";
   if (!cmp && S.mode === "delta") S.mode = "rank";
   if (S.mode === "difficulty" && !S.analysis) S.mode = "rank";
+  if (S.mode === "opportunity" && S.analysis?.iop?.score == null) S.mode = "rank";
   $("#difficultyBtn").disabled = !S.analysis || !!S.competitor;
-  $("#rankLegend").classList.toggle("hidden", S.mode === "difficulty");
+  $("#opportunityBtn").disabled = S.analysis?.iop?.score == null || !!S.competitor;
+  $("#rankLegend").classList.toggle("hidden", S.mode === "difficulty" || S.mode === "opportunity");
   $("#difficultyLegend").classList.toggle("hidden", S.mode !== "difficulty");
+  $("#opportunityLegend").classList.toggle("hidden", S.mode !== "opportunity");
   document.querySelectorAll("#viewToggle button").forEach((b) => b.classList.toggle("on", b.dataset.mode === S.mode));
   $("#viewing").innerHTML = S.competitor
     ? `<span class="chip">Showing: <b>${esc(S.competitor.name)}</b> <a href="#" id="clearComp">✕ back to my business</a></span>` : "";
@@ -269,6 +289,9 @@ function renderMetrics() {
     ["Found", fmt(m.found_pct, "%"), "points in top 20", delta("found_pct", false)],
     ["IVL", S.competitor ? "–" : fmt(S.analysis?.metrics?.ivl, "%"), "Indice de visibilidade local (pontos validos)", ""],
     ["IDA", S.competitor ? "–" : fmt(S.analysis?.ida_average), "Indice experimental de dificuldade (0 a 100)", ""],
+    ["ICM", S.competitor ? "–" : fmt(S.analysis?.icm?.score), "ICM experimental do negócio monitorado, somente se observado", ""],
+    ["ICP-B V2", S.competitor ? "–" : fmt(S.analysis?.icpb_v2?.score), "Pressão competitiva descritiva; não é probabilidade", ""],
+    ["IOP", S.competitor ? "–" : fmt(S.analysis?.iop?.score), "Protótipo não validado; não é probabilidade nem previsão de vendas", ""],
   ].map(([l, v, title, dl]) => `<div class="metric" title="${title}"><div class="l">${l}</div><div class="v">${v}</div>${dl}</div>`).join("");
 }
 
@@ -304,7 +327,7 @@ function drawScanGrid() {
   pts.forEach(([lat, lng], idx) => {
     const row = Math.floor(idx / s.grid_size), col = idx % s.grid_size;
     const p = byCell.get(`${row},${col}`);
-    let cls, label;
+    let cls, label, iconStyle = "";
     if (!p) { cls = "pending"; label = "…"; }
     else if (p.status !== "ok") { cls = "rx"; label = "!"; }
     else {
@@ -314,6 +337,14 @@ function drawScanGrid() {
         const ida = a?.difficulty?.ida;
         if (ida === null || ida === undefined) { cls = "ida-missing"; label = "?"; }
         else { cls = ida < 35 ? "ida-easy" : ida < 70 ? "ida-medium" : "ida-hard"; label = String(Math.round(ida)); }
+      } else if (S.mode === "opportunity" && S.analysis && !S.competitor) {
+        const opportunity = (S.analysis.iop?.points || []).find((x) => x.row === row && x.col === col);
+        if (opportunity?.score === null || opportunity?.score === undefined) {
+          cls = "ida-missing"; label = "?";
+        } else {
+          cls = "iop"; label = String(Math.round(opportunity.score));
+          iconStyle = `--iop-hue:${Math.round(120 * opportunity.score / 100)}`;
+        }
       } else if (S.mode === "delta" && s.comparison) {
         const prevRaw = s.comparison.points[`${row},${col}`];
         if (prevRaw === undefined) { cls = "same"; label = "?"; }
@@ -324,7 +355,7 @@ function drawScanGrid() {
         }
       } else { cls = rankClass(rank); label = rank ?? "20+"; }
     }
-    const m = L.marker([lat, lng], { icon: L.divIcon({ className: "", html: `<div class="pin ${cls}">${label}</div>`, iconSize: [34, 34] }) });
+    const m = L.marker([lat, lng], { icon: L.divIcon({ className: "", html: `<div class="pin ${cls}" style="${iconStyle}">${label}</div>`, iconSize: [34, 34] }) });
     if (p) m.bindPopup(() => popupHtml(p, key), { maxWidth: 320, autoPanPaddingTopLeft: L.point(pad.topLeft), autoPanPaddingBottomRight: L.point(pad.bottomRight) });
     m.addTo(gridLayer);
   });
@@ -336,9 +367,11 @@ function popupHtml(p, key) {
   const a = S.analysis?.points?.find((x) => x.row === p.row && x.col === p.col);
   const ida = a?.difficulty?.ida;
   const difficultyText = ida == null ? "IDA: dados insuficientes" : `IDA experimental: ${ida} / 100 (${esc(a.difficulty.level)})`;
+  const opportunity = S.analysis?.iop?.points?.find((x) => x.row === p.row && x.col === p.col);
+  const opportunityText = opportunity?.score == null ? "" : `<div>IOP experimental: ${opportunity.score} / 100</div>`;
   const items = p.results.map((r) => `<li class="${sameBiz(r, key) ? "hit" : ""}">${esc(r.name)}${r.rating ? ` <span class="muted">★${r.rating}</span>` : ""}</li>`).join("");
   return `<div class="popup"><h4>${esc(key.name)}: ${rank ? "#" + rank : "not in top 20"}</h4>
-    <div class="muted">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div><div>${difficultyText}</div><ol>${items || "<li class='muted'>No results</li>"}</ol></div>`;
+    <div class="muted">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div><div>${difficultyText}</div>${opportunityText}<ol>${items || "<li class='muted'>No results</li>"}</ol></div>`;
 }
 
 document.querySelectorAll("#viewToggle button").forEach((b) => b.addEventListener("click", () => {
