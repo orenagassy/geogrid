@@ -13,7 +13,7 @@ def test_no_reviews():
 @pytest.mark.parametrize("rating,reviews", [
     (6, 20), (0, 20), (4.5, -1),
     (float("nan"), 20), (4.5, float("inf")),
-    (4.5, 1.5), ("invalid", 20),
+    (4.5, 1.5), ("invalid", 20), (True, 20), (4.5, True),
 ])
 def test_invalid_inputs(rating, reviews):
     assert brand_confidence(rating, reviews)["score"] is None

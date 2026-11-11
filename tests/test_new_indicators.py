@@ -1,3 +1,5 @@
+from itertools import permutations
+
 import pytest
 
 from app.competitive_metrics import (
@@ -245,6 +247,47 @@ def test_ice_marks_inconsistent_category_evidence_indeterminate():
 
     assert result["counts"]["indeterminate"] == 1
     assert result["businesses"][0]["reason"] == "inconsistent_category_observations"
+
+
+def test_ice_name_conflicts_are_classified_independently_of_observation_order():
+    listings = [
+        business(
+            "same",
+            category="Computer store",
+            name="Marketing agency Austin",
+        ),
+        business(
+            "same",
+            category="Computer store",
+            name="Austin digital solutions",
+        ),
+    ]
+
+    classifications = []
+    for ordering in permutations(listings):
+        result = classify_competitors(
+            [{"status": "ok", "results": list(ordering)}],
+            target=TARGET,
+            target_category="Marketing agency",
+            keyword="marketing agency",
+        )
+        entry = result["businesses"][0]
+        classifications.append(
+            (
+                entry["classification"],
+                entry["name"],
+                entry["observed_names"],
+                entry["evidence"],
+            )
+        )
+
+    assert classifications[0] == classifications[1]
+    assert classifications[0][0] == "keyword_only"
+    assert classifications[0][1] is None
+    assert classifications[0][2] == [
+        "Austin digital solutions",
+        "Marketing agency Austin",
+    ]
 
 
 def test_ice_does_not_infer_indirect_competition_without_related_category():

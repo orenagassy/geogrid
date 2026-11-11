@@ -73,3 +73,70 @@ def test_v2_rejects_insufficient_points():
 
     assert result["score"] is None
     assert result["reason"] == "insufficient_valid_points"
+
+
+def test_v2_requires_coverage_of_total_grid():
+    target = {"business_cid": "target"}
+    valid_points = [
+        point(
+            business("200", "a"),
+            business("300", "b"),
+            business("400", "c"),
+        )
+        for _ in range(3)
+    ]
+    points = valid_points + [
+        {"status": "error", "results": []}
+        for _ in range(97)
+    ]
+
+    result = keyword_competition_v2(points, target=target)
+
+    assert result["score"] is None
+    assert result["reason"] == "insufficient_total_point_coverage"
+    assert result["total_points"] == 100
+    assert result["valid_points"] == 3
+    assert result["point_coverage_pct"] == 3.0
+    assert result["total_point_coverage_pct"] == 3.0
+    assert result["usable_points"] == 3
+    assert result["usable_point_coverage_pct"] == 100.0
+
+
+def test_v2_accepts_total_point_coverage_exactly_at_minimum():
+    target = {"business_cid": "target"}
+    valid_points = [
+        point(
+            business("200", "a"),
+            business("300", "b"),
+            business("400", "c"),
+        )
+        for _ in range(4)
+    ]
+    points = valid_points + [{"status": "error", "results": []}]
+
+    result = keyword_competition_v2(points, target=target)
+
+    assert result["point_coverage_pct"] == 80.0
+    assert result["score"] is not None
+    assert result["reason"] is None
+
+
+def test_v2_reports_identity_conflicts_when_other_coverage_is_sufficient():
+    target = {"business_cid": "target"}
+    points = [
+        point(
+            business("200", "shared"),
+            business("300", "shared"),
+            business("400", "independent-a"),
+            business("500", "independent-b"),
+            business("600", "independent-c"),
+        )
+        for _ in range(3)
+    ]
+
+    result = keyword_competition_v2(points, target=target)
+
+    assert result["score"] is None
+    assert result["reason"] == "conflicting_identifiers"
+    assert result["point_coverage_pct"] == 100.0
+    assert result["valid_points"] == 3

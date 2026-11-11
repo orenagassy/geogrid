@@ -60,9 +60,14 @@ or make additional DataForSEO requests.
   competitor reputation, ranking position and territorial recurrence, after
   excluding the monitored business and rejecting identifier conflicts. Its
   provisional combination is 75% position-weighted reputation and 25%
-  territorial recurrence. At least 80% usable-point coverage is required; the
-  grid points are spatially dependent, so the score is not a confidence
-  interval or an independent-sample estimate.
+  territorial recurrence. The score requires at least 80% coverage of all
+  grid points, as well as the existing valid-point, review-coverage and
+  usable-point gates. Conflicting complete rating/review observations for one
+  official identity are omitted from its reputation component; incomplete
+  observations do not get combined into a synthetic pair. The response
+  distinguishes total-point coverage, valid points and usable points. Grid
+  points are spatially dependent, so the score is not a confidence interval
+  or an independent-sample estimate.
 - **ICE** classifies identified listings using visible evidence:
   - `direct`: exact normalized category match with the monitored business;
   - `indirect`: exact match with a related category explicitly supplied as a
@@ -74,7 +79,9 @@ or make additional DataForSEO requests.
 
   Search results currently provide names, categories and addresses, but not
   descriptions or service lists. ICE does not infer those missing fields and
-  does not treat every result as a direct competitor.
+  does not treat every result as a direct competitor. Divergent names for one
+  official identity are retained as a sorted observation list; keyword
+  evidence is evaluated across that list rather than selecting the first name.
 - **IDA** remains an experimental difficulty proxy. It deduplicates and
   reconciles official identifiers before applying its sample gate, excludes
   the monitored business when its official ID is known, and does not report a

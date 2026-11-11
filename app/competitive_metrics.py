@@ -28,6 +28,8 @@ def brand_confidence(rating, reviews, *, prior_mean=4.0, prior_weight=20,
 
     if rating is None or reviews is None:
         return {**result, "reason": "missing_data"}
+    if isinstance(rating, bool) or isinstance(reviews, bool):
+        return {**result, "reason": "invalid_data"}
 
     try:
         rating = float(rating)
@@ -244,11 +246,15 @@ def keyword_competition_v2(
     min_valid_points=3,
     min_unique_businesses=3,
     min_review_coverage=0.6,
+    min_point_coverage=0.8,
 ):
     """Experimental descriptive competition index, version 2.
 
-    Grid points are spatially dependent. This score is not a
-    probability, confidence interval, or calibrated market estimate.
+    Grid points are spatially dependent. Scores require 80% total point
+    coverage; conflicting complete rating observations for one identity are
+    excluded from the reputation component rather than arbitrarily selected.
+    This score is not a probability, confidence interval, or calibrated
+    market estimate.
     """
     from collections import defaultdict
 
@@ -265,10 +271,25 @@ def keyword_competition_v2(
         "excluded_target_occurrences": 0,
         "conflicting_occurrences": 0,
         "unresolved_occurrences": 0,
+        "total_points": 0,
+        "valid_points": 0,
+        "point_coverage_pct": 0.0,
+        "total_point_coverage_pct": 0.0,
+        "unique_businesses": 0,
+        "usable_points": 0,
+        "usable_point_coverage_pct": 0.0,
     }
 
     if not isinstance(points, list) or not points:
         return {**base, "reason": "no_points"}
+
+    if not (
+        isinstance(min_point_coverage, (int, float))
+        and not isinstance(min_point_coverage, bool)
+        and math.isfinite(min_point_coverage)
+        and 0 < min_point_coverage <= 1
+    ):
+        return {**base, "reason": "coverage_threshold_invalid"}
 
     valid = [
         p for p in points
@@ -276,14 +297,7 @@ def keyword_competition_v2(
     ]
 
     total = len(points)
-
-    if len(valid) < min_valid_points:
-        return {
-            **base,
-            "reason": "insufficient_valid_points",
-            "valid_points": len(valid),
-            "total_points": total,
-        }
+    point_coverage = len(valid) / total
 
     # Reconcile all observed business identities together.
     occurrences = []
@@ -302,7 +316,7 @@ def keyword_competition_v2(
     )
 
     by_point = defaultdict(dict)
-    unique_businesses = {}
+    observations_by_identity = defaultdict(list)
     excluded_target = 0
     conflicting = 0
     unresolved = 0
@@ -331,13 +345,13 @@ def keyword_competition_v2(
             continue
 
         key = identity["key"]
+        observations_by_identity[key].append(business)
 
         # Deduplicate within each point; keep first ranking position.
         if key in by_point[point_index]:
             continue
 
         by_point[point_index][key] = (position, business)
-        unique_businesses.setdefault(key, business)
 
     # Territorial recurrence uses all identified, deduplicated
     # competitors, regardless of reputation availability.
@@ -355,44 +369,81 @@ def keyword_competition_v2(
         if territorial_appearances else None
     )
 
+    reputation_by_identity = {}
+    inconsistent_review_businesses = 0
+    unavailable_review_businesses = 0
+    for key, observations in observations_by_identity.items():
+        consistent_pairs = {}
+        for business in observations:
+            reputation = brand_confidence(
+                business.get("rating"),
+                business.get("reviews"),
+            )
+            if reputation["score"] is not None:
+                pair = (reputation["rating"], reputation["reviews"])
+                consistent_pairs[pair] = reputation
+
+        if len(consistent_pairs) > 1:
+            inconsistent_review_businesses += 1
+        elif consistent_pairs:
+            reputation_by_identity[key] = next(
+                iter(consistent_pairs.values())
+            )
+        else:
+            unavailable_review_businesses += 1
+
+    unique_count = len(observations_by_identity)
+    reviewed = len(reputation_by_identity)
+    review_coverage = reviewed / unique_count if unique_count else 0
+    usable_point_indexes = {
+        point_index
+        for point_index, businesses in by_point.items()
+        if any(key in reputation_by_identity for key in businesses)
+    }
+    usable_points = len(usable_point_indexes)
+    usable_coverage = usable_points / len(valid) if valid else 0.0
     metadata = {
         "territorial_recurrence": (
             round(territorial_recurrence, 3)
             if territorial_recurrence is not None
             else None
         ),
-        "valid_points": len(valid),
         "total_points": total,
-        "unique_businesses": len(unique_businesses),
+        "valid_points": len(valid),
+        "point_coverage_pct": round(100 * point_coverage, 1),
+        "total_point_coverage_pct": round(100 * point_coverage, 1),
+        "unique_businesses": unique_count,
         "excluded_target_occurrences": excluded_target,
         "conflicting_occurrences": conflicting,
         "unresolved_occurrences": unresolved,
-        "point_coverage_pct": round(
-            100 * len(valid) / total, 1
-        ),
+        "reviewed_businesses": reviewed,
+        "review_coverage_pct": round(100 * review_coverage, 1),
+        "inconsistent_review_businesses": inconsistent_review_businesses,
+        "unavailable_review_businesses": unavailable_review_businesses,
+        "usable_points": usable_points,
+        "usable_point_coverage_pct": round(100 * usable_coverage, 1),
     }
 
-    if len(unique_businesses) < min_unique_businesses:
+    if point_coverage < min_point_coverage:
+        return {
+            **base,
+            **metadata,
+            "reason": "insufficient_total_point_coverage",
+        }
+
+    if len(valid) < min_valid_points:
+        return {
+            **base,
+            **metadata,
+            "reason": "insufficient_valid_points",
+        }
+
+    if unique_count < min_unique_businesses:
         return {
             **base,
             **metadata,
             "reason": "insufficient_unique_businesses",
         }
-
-    reviewed = sum(
-        brand_confidence(
-            business.get("rating"),
-            business.get("reviews"),
-        )["score"] is not None
-        for business in unique_businesses.values()
-    )
-
-    review_coverage = reviewed / len(unique_businesses)
-
-    metadata["reviewed_businesses"] = reviewed
-    metadata["review_coverage_pct"] = round(
-        100 * review_coverage, 1
-    )
 
     if review_coverage < min_review_coverage:
         return {
@@ -420,13 +471,9 @@ def keyword_competition_v2(
         weighted_sum = 0.0
         weight_total = 0.0
 
-        for key, (position, business) in businesses.items():
-            reputation = brand_confidence(
-                business.get("rating"),
-                business.get("reviews"),
-            )
-
-            if reputation["score"] is None:
+        for key, (position, _) in businesses.items():
+            reputation = reputation_by_identity.get(key)
+            if reputation is None:
                 continue
 
             # Provisional position discount, not calibrated.
@@ -442,12 +489,6 @@ def keyword_competition_v2(
             point_strengths.append(
                 weighted_sum / weight_total
             )
-
-    usable_coverage = len(point_strengths) / len(valid)
-
-    metadata["usable_point_coverage_pct"] = round(
-        100 * usable_coverage, 1
-    )
 
     if usable_coverage < 0.8:
         return {
@@ -693,7 +734,6 @@ def classify_competitors(
             identity["key"],
             {
                 "business_key": identity["key"],
-                "name": business.get("name"),
                 "categories": set(),
                 "names": set(),
                 "point_indexes": set(),
@@ -717,11 +757,13 @@ def classify_competitors(
     }
     results = []
 
-    for entry in grouped.values():
+    for business_key in sorted(grouped):
+        entry = grouped[business_key]
         categories = entry["categories"]
         names = entry["names"]
-        category = next(iter(categories)) if len(categories) == 1 else None
-        name = next(iter(names)) if len(names) == 1 else entry["name"]
+        category = sorted(categories)[0] if len(categories) == 1 else None
+        observed_names = sorted(names)
+        name = observed_names[0] if len(observed_names) == 1 else None
         category_norm = _classification_text(category)
         evidence = []
         reason = "insufficient_category_evidence"
@@ -737,28 +779,35 @@ def classify_competitors(
             classification = "indirect"
             reason = "configured_related_category"
             evidence.append({"source": "category", "value": category})
-        elif (
-            category_norm
-            and target_category_norm
-            and category_norm not in related
-            and (
-                _contains_phrase(name, keyword)
-                or _contains_phrase(category, keyword)
-            )
-        ):
-            classification = "keyword_only"
-            reason = "query_phrase_in_name_with_different_category"
-            evidence.extend([
-                {"source": "name", "value": name},
-                {"source": "keyword", "value": keyword},
-                {"source": "category", "value": category},
-            ])
         else:
-            classification = "indeterminate"
+            matching_names = [
+                observed_name
+                for observed_name in observed_names
+                if _contains_phrase(observed_name, keyword)
+            ]
+            keyword_in_category = _contains_phrase(category, keyword)
+            if (
+                category_norm
+                and target_category_norm
+                and category_norm not in related
+                and (matching_names or keyword_in_category)
+            ):
+                classification = "keyword_only"
+                reason = "query_phrase_in_name_with_different_category"
+                evidence.extend(
+                    {"source": "name", "value": observed_name}
+                    for observed_name in matching_names
+                )
+                if keyword_in_category:
+                    evidence.append({"source": "category", "value": category})
+                evidence.append({"source": "keyword", "value": keyword})
+            else:
+                classification = "indeterminate"
 
         results.append({
             "business_key": entry["business_key"],
             "name": name,
+            "observed_names": observed_names,
             "category": category,
             "classification": classification,
             "reason": reason,
@@ -772,6 +821,13 @@ def classify_competitors(
         counts[result["classification"]] += 1
     counts["indeterminate"] += len(unresolved_entries)
     results.extend(unresolved_entries)
+    results.sort(
+        key=lambda result: (
+            str(result.get("business_key") or ""),
+            str(result.get("name") or ""),
+            str(result.get("category") or ""),
+        )
+    )
 
     return {
         **base,

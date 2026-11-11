@@ -27,7 +27,8 @@ adicionais à DataForSEO.
 - Só identifica o alvo por CID/Place ID oficial. Observações repetidas com
   avaliações ou contagens divergentes bloqueiam o resultado.
 - Valida avaliação entre 1 e 5 e contagem de avaliações inteira e não negativa;
-  zero avaliações não produz score.
+  valores booleanos não são aceitos como números e zero avaliações não produz
+  score.
 - A implementação atual aplica suavização fixa:
   `rating_adjusted = (reviews × rating + 20 × 4) / (reviews + 20)`;
   `volume = min(1, ln(1 + reviews) / ln(1001))`; e
@@ -45,7 +46,12 @@ adicionais à DataForSEO.
   ambígua sobre o alvo bloqueiam o score; seus contadores e motivos ficam na
   resposta.
 - Requer pelo menos 3 pontos válidos, 3 negócios únicos, cobertura de avaliações
-  de pelo menos 60% e pelo menos 80% de pontos utilizáveis.
+  de pelo menos 60%, pelo menos 80% dos pontos totais válidos e pelo menos 80%
+  dos pontos válidos utilizáveis. A resposta distingue `total_points`,
+  `valid_points`, `usable_points` e as respectivas coberturas.
+- Avaliações são consolidadas por identidade oficial: pares completos
+  divergentes são omitidos da força de reputação, sem escolher a primeira
+  ocorrência; observações incompletas não são combinadas para formar um par.
 - Para cada ponto utilizável, calcula a média de força de reputação ponderada
   por `1 / posição`; agrega a força média dos pontos com a recorrência territorial:
   `ICP-B V2 = 100 × (0.75 × força média + 0.25 × recorrência territorial)`.
@@ -73,11 +79,13 @@ Classifica negócios identificados e deduplicados em uma destas classes:
   conflito de identidade, a categoria diverge entre observações ou não há sinal
   classificatório suficiente.
 
-Cada classificação identificada inclui motivo, evidência, ocorrências e pontos
-observados. O alvo é excluído. Registros sem identificação/conflictantes ficam
-indeterminados, nunca são presumidos concorrentes diretos. Categorias iguais
-são somente um proxy textual de concorrência, não comprovam que serviços ou
-clientes sejam iguais.
+Nomes divergentes da mesma identidade são mantidos em lista ordenada e a
+evidência de palavra-chave é avaliada sobre todos os nomes observados, sem
+depender da ordem de chegada. Cada classificação identificada inclui motivo,
+evidência, ocorrências e pontos observados. O alvo é excluído. Registros sem
+identificação/conflictantes ficam indeterminados, nunca são presumidos
+concorrentes diretos. Categorias iguais são somente um proxy textual de
+concorrência, não comprovam que serviços ou clientes sejam iguais.
 
 ### IOP — oportunidade de posicionamento, protótipo experimental não validado
 
