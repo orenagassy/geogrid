@@ -4,10 +4,134 @@ const KM_PER_MI = 1.609344;
 const EARTH_KM = 6371.0088;
 const NOT_FOUND = 21;
 
+const helpPanel = $("#helpPanel");
+const helpMenuButton = $("#helpMenuBtn");
+helpMenuButton.addEventListener("click", () => {
+  helpPanel.showModal();
+  helpMenuButton.setAttribute("aria-expanded", "true");
+  $("#closeHelpPanel").focus();
+});
+$("#closeHelpPanel").addEventListener("click", () => helpPanel.close());
+helpPanel.addEventListener("close", () => {
+  helpMenuButton.setAttribute("aria-expanded", "false");
+  helpMenuButton.focus();
+});
+helpPanel.addEventListener("click", (event) => {
+  if (event.target === helpPanel) helpPanel.close();
+});
+
 const S = {
   businesses: [], business: null, scans: [], scan: null,
   center: null, mode: "rank", competitor: null, pollTimer: null, analysis: null, analysisScanId: null,
 };
+
+const DEFAULT_INDICATOR_PREFERENCES = Object.freeze({
+  arp: true,
+  atrp: true,
+  solv: true,
+  found: true,
+  ivl: true,
+  ida: true,
+  icm: true,
+  icpb_v2: true,
+  iop: true,
+});
+let indicatorPreferences = loadIndicatorPreferences();
+let indicatorPreferenceDraft = { ...indicatorPreferences };
+
+function loadIndicatorPreferences() {
+  let saved = {};
+  try {
+    const parsed = JSON.parse(localGet("indicatorPreferences") || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) saved = parsed;
+  } catch {
+    // Invalid browser storage should leave all indicators enabled.
+  }
+  return Object.fromEntries(
+    Object.keys(DEFAULT_INDICATOR_PREFERENCES).map((id) => [
+      id,
+      typeof saved[id] === "boolean" ? saved[id] : true,
+    ]),
+  );
+}
+
+function indicatorEnabled(id) {
+  return indicatorPreferences[id] !== false;
+}
+
+function hasEnabledAnalysisIndicator() {
+  return ["ivl", "ida", "icm", "icpb_v2", "iop"].some(indicatorEnabled);
+}
+
+function syncIndicatorPreferenceControls() {
+  document.querySelectorAll("[data-indicator-toggle]").forEach((input) => {
+    const enabled = indicatorPreferenceDraft[input.dataset.indicatorToggle] !== false;
+    input.checked = enabled;
+    input.closest("[data-indicator-item]")?.classList.toggle("is-disabled", !enabled);
+    const state = input.parentElement.querySelector("[data-indicator-state]");
+    if (state) state.textContent = enabled ? "Ativo" : "Inativo";
+  });
+}
+
+function updateIndicatorVisibility() {
+  document.querySelectorAll("[data-indicator-column]").forEach((column) => {
+    column.classList.toggle("hidden", !indicatorEnabled(column.dataset.indicatorColumn));
+  });
+  $("#difficultyBtn").classList.toggle("hidden", !indicatorEnabled("ida"));
+  $("#opportunityBtn").classList.toggle("hidden", !indicatorEnabled("iop"));
+  $("#difficultyLegend").classList.toggle(
+    "hidden",
+    S.mode !== "difficulty" || !indicatorEnabled("ida"),
+  );
+  $("#opportunityLegend").classList.toggle(
+    "hidden",
+    S.mode !== "opportunity" || !indicatorEnabled("iop"),
+  );
+}
+
+function applyIndicatorPreferences({ restoreDefaults = false } = {}) {
+  indicatorPreferences = { ...indicatorPreferenceDraft };
+  localSet("indicatorPreferences", JSON.stringify(indicatorPreferences));
+  if (
+    (S.mode === "difficulty" && !indicatorEnabled("ida"))
+    || (S.mode === "opportunity" && !indicatorEnabled("iop"))
+  ) {
+    S.mode = "rank";
+  }
+  syncIndicatorPreferenceControls();
+  $("#indicatorPreferenceStatus").textContent = restoreDefaults
+    ? "Padrão restaurado: todos os indicadores estão ativos."
+    : "Preferências aplicadas.";
+  if (S.scan) renderScan(false);
+  else {
+    renderHistoryList();
+    updateIndicatorVisibility();
+  }
+}
+
+syncIndicatorPreferenceControls();
+$("#selectAllIndicators").addEventListener("click", () => {
+  indicatorPreferenceDraft = { ...DEFAULT_INDICATOR_PREFERENCES };
+  syncIndicatorPreferenceControls();
+});
+$("#deselectAllIndicators").addEventListener("click", () => {
+  indicatorPreferenceDraft = Object.fromEntries(
+    Object.keys(DEFAULT_INDICATOR_PREFERENCES).map((id) => [id, false]),
+  );
+  syncIndicatorPreferenceControls();
+});
+$("#restoreIndicatorDefaults").addEventListener("click", () => {
+  indicatorPreferenceDraft = { ...DEFAULT_INDICATOR_PREFERENCES };
+  applyIndicatorPreferences({ restoreDefaults: true });
+});
+$("#applyIndicatorPreferences").addEventListener("click", () => applyIndicatorPreferences());
+document.querySelectorAll("[data-indicator-toggle]").forEach((input) => {
+  input.addEventListener("change", () => {
+    indicatorPreferenceDraft[input.dataset.indicatorToggle] = input.checked;
+    syncIndicatorPreferenceControls();
+  });
+});
+updateIndicatorVisibility();
 
 // ---------- map ----------
 const map = L.map("map", { zoomControl: false }).setView([39.5, -98.35], 4);
@@ -21,9 +145,16 @@ function cardPadding() {
   const right = comp && comp.width < mapBox.width / 2 ? mapBox.right - comp.left + 20 : 40;
   return { topLeft: [40, top], bottomRight: [right, 50] };
 }
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19, attribution: "&copy; OpenStreetMap contributors",
-}).addTo(map);
+const maptilerKey = document.querySelector('meta[name="maptiler-api-key"]')?.content.trim();
+if (maptilerKey) {
+  const tileUrl = `https://api.maptiler.com/maps/streets-v4/{z}/{x}/{y}.png?key=${encodeURIComponent(maptilerKey)}`;
+  L.tileLayer(tileUrl, {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>',
+  }).addTo(map);
+} else {
+  $("#mapTileStatus").classList.remove("hidden");
+}
 const gridLayer = L.layerGroup().addTo(map);
 let centerMarker = null, bizMarker = null;
 
@@ -188,14 +319,20 @@ $("#runBtn").addEventListener("click", async () => {
 async function loadHistory() {
   if (!S.business) return;
   S.scans = await api(`/api/scans?business_id=${S.business.id}`);
+  renderHistoryList();
+}
+
+function renderHistoryList() {
   const ul = $("#history");
   if (!S.scans.length) { ul.innerHTML = '<li class="muted small">No scans yet.</li>'; return; }
   ul.innerHTML = S.scans.map((s) => {
     const m = s.metrics || {};
-    const badge = s.status === "done" ? `SoLV ${fmt(m.solv, "%")}` : s.status === "running" ? `${s.progress}/${s.total}` : "failed";
+    const badge = s.status === "done"
+      ? indicatorEnabled("solv") ? `SoLV ${fmt(m.solv, "%")}` : "done"
+      : s.status === "running" ? `${s.progress}/${s.total}` : "failed";
     return `<li class="item ${S.scan && S.scan.id === s.id ? "active" : ""}" data-id="${s.id}">
       <span class="kw">${esc(s.keyword)}</span><span class="badge ${s.status}">${badge}</span>
-      <span class="meta">${when(s.created)} · ${gridLabel(s)}${s.status === "done" ? ` · ARP ${fmt(m.arp)}` : ""}</span></li>`;
+      <span class="meta">${when(s.created)} · ${gridLabel(s)}${s.status === "done" && indicatorEnabled("arp") ? ` · ARP ${fmt(m.arp)}` : ""}</span></li>`;
   }).join("");
 }
 $("#history").addEventListener("click", (e) => { const li = e.target.closest("li.item"); if (li) openScan(+li.dataset.id); });
@@ -239,25 +376,28 @@ function renderScan(fit) {
   const info = $("#analysisInfo");
   if (S.analysis) {
     const ice = S.analysis.ice?.counts || {};
-    info.textContent = [
-      `IDA: ${S.analysis.ida_evaluated_points ?? 0} pontos · ${fmt(S.analysis.ida_coverage_pct, "%")} cobertura`,
+    const analysisDetails = [
+      indicatorEnabled("ida")
+        ? `IDA: ${S.analysis.ida_evaluated_points ?? 0} pontos · ${fmt(S.analysis.ida_coverage_pct, "%")} cobertura`
+        : null,
       `ICE: ${ice.direct ?? 0} diretos, ${ice.indirect ?? 0} indiretos, ${ice.keyword_only ?? 0} por palavra-chave, ${ice.indeterminate ?? 0} indeterminados`,
-      "IOP: protótipo experimental não validado",
-    ].join(" · ");
+      indicatorEnabled("iop") ? "IOP: protótipo experimental não validado" : null,
+    ].filter(Boolean);
+    info.textContent = analysisDetails.join(" · ");
   } else {
-    info.textContent = s.status === "done" ? "Carregando análise de indicadores…" : "";
+    info.textContent = s.status === "done" && hasEnabledAnalysisIndicator()
+      ? "Carregando análise de indicadores…"
+      : "";
   }
   const cmp = s.comparison;
   $("#deltaBtn").disabled = !cmp;
   $("#deltaBtn").title = cmp ? `Compared with ${when(cmp.previous_created)}` : "Needs an earlier scan with the same keyword and grid";
   if (!cmp && S.mode === "delta") S.mode = "rank";
-  if (S.mode === "difficulty" && !S.analysis) S.mode = "rank";
-  if (S.mode === "opportunity" && S.analysis?.iop?.score == null) S.mode = "rank";
-  $("#difficultyBtn").disabled = !S.analysis || !!S.competitor;
-  $("#opportunityBtn").disabled = S.analysis?.iop?.score == null || !!S.competitor;
+  if (S.mode === "difficulty" && (!indicatorEnabled("ida") || !S.analysis)) S.mode = "rank";
+  if (S.mode === "opportunity" && (!indicatorEnabled("iop") || S.analysis?.iop?.score == null)) S.mode = "rank";
+  $("#difficultyBtn").disabled = !S.analysis || !!S.competitor || !indicatorEnabled("ida");
+  $("#opportunityBtn").disabled = S.analysis?.iop?.score == null || !!S.competitor || !indicatorEnabled("iop");
   $("#rankLegend").classList.toggle("hidden", S.mode === "difficulty" || S.mode === "opportunity");
-  $("#difficultyLegend").classList.toggle("hidden", S.mode !== "difficulty");
-  $("#opportunityLegend").classList.toggle("hidden", S.mode !== "opportunity");
   document.querySelectorAll("#viewToggle button").forEach((b) => b.classList.toggle("on", b.dataset.mode === S.mode));
   $("#viewing").innerHTML = S.competitor
     ? `<span class="chip">Showing: <b>${esc(S.competitor.name)}</b> <a href="#" id="clearComp">✕ back to my business</a></span>` : "";
@@ -265,6 +405,7 @@ function renderScan(fit) {
   if (clr) clr.addEventListener("click", (e) => { e.preventDefault(); S.competitor = null; renderScan(false); });
 
   renderCompetitors();
+  updateIndicatorVisibility();
   drawScanGrid();
   if (fit) fitGrid();
 }
@@ -282,17 +423,22 @@ function renderMetrics() {
     return `<div class="d ${good ? "up" : "down"}">${v > 0 ? "+" : ""}${v}</div>`;
   };
   if (s.status === "failed") { $("#metrics").innerHTML = `<div class="err small" style="grid-column:1/-1">Scan failed: ${esc(s.error)}</div>`; return; }
-  $("#metrics").innerHTML = [
-    ["ARP", fmt(m.arp), "avg rank where found", delta("arp", true)],
-    ["ATRP", fmt(m.atrp), "avg rank, 20+ = 21", delta("atrp", true)],
-    ["SoLV", fmt(m.solv, "%"), "points in top 3", delta("solv", false)],
-    ["Found", fmt(m.found_pct, "%"), "points in top 20", delta("found_pct", false)],
-    ["IVL", S.competitor ? "–" : fmt(S.analysis?.metrics?.ivl, "%"), "Indice de visibilidade local (pontos validos)", ""],
-    ["IDA", S.competitor ? "–" : fmt(S.analysis?.ida_average), "Indice experimental de dificuldade (0 a 100)", ""],
-    ["ICM", S.competitor ? "–" : fmt(S.analysis?.icm?.score), "ICM experimental do negócio monitorado, somente se observado", ""],
-    ["ICP-B V2", S.competitor ? "–" : fmt(S.analysis?.icpb_v2?.score), "Pressão competitiva descritiva; não é probabilidade", ""],
-    ["IOP", S.competitor ? "–" : fmt(S.analysis?.iop?.score), "Protótipo não validado; não é probabilidade nem previsão de vendas", ""],
-  ].map(([l, v, title, dl]) => `<div class="metric" title="${title}"><div class="l">${l}</div><div class="v">${v}</div>${dl}</div>`).join("");
+  const metrics = [
+    ["arp", "ARP", fmt(m.arp), "avg rank where found", delta("arp", true)],
+    ["atrp", "ATRP", fmt(m.atrp), "avg rank, 20+ = 21", delta("atrp", true)],
+    ["solv", "SoLV", fmt(m.solv, "%"), "points in top 3", delta("solv", false)],
+    ["found", "Found", fmt(m.found_pct, "%"), "points in top 20", delta("found_pct", false)],
+    ["ivl", "IVL", S.competitor ? "–" : fmt(S.analysis?.metrics?.ivl, "%"), "Indice de visibilidade local (pontos validos)", ""],
+    ["ida", "IDA", S.competitor ? "–" : fmt(S.analysis?.ida_average), "Indice experimental de dificuldade (0 a 100)", ""],
+    ["icm", "ICM", S.competitor ? "–" : fmt(S.analysis?.icm?.score), "ICM experimental do negócio monitorado, somente se observado", ""],
+    ["icpb_v2", "ICP-B V2", S.competitor ? "–" : fmt(S.analysis?.icpb_v2?.score), "Pressão competitiva descritiva; não é probabilidade", ""],
+    ["iop", "IOP", S.competitor ? "–" : fmt(S.analysis?.iop?.score), "Protótipo não validado; não é probabilidade nem previsão de vendas", ""],
+  ];
+  $("#metrics").innerHTML = metrics
+    .filter(([id]) => indicatorEnabled(id))
+    .map(([id, label, value, title, change]) =>
+      `<div class="metric" data-indicator-card="${id}" title="${title}"><div class="l">${label}</div><div class="v">${value}</div>${change}</div>`,
+    ).join("");
 }
 
 function renderCompetitors() {
@@ -302,7 +448,8 @@ function renderCompetitors() {
   $("#compTable tbody").innerHTML = list.map((c, i) => `
     <tr data-i="${i}" class="${sameBiz(c, me) ? "me" : ""} ${S.competitor && sameBiz(c, S.competitor) ? "sel" : ""}">
       <td>${i + 1}</td><td title="${esc(c.name)}${c.category ? " · " + esc(c.category) : ""}">${esc(c.name)}</td>
-      <td>${c.solv}%</td><td>${c.atrp}</td><td>${c.found_pct}%</td><td>${fmt(c.rating)}</td></tr>`).join("");
+      <td data-indicator-column="solv">${c.solv}%</td><td data-indicator-column="atrp">${c.atrp}</td><td data-indicator-column="found">${c.found_pct}%</td><td>${fmt(c.rating)}</td></tr>`).join("");
+  updateIndicatorVisibility();
 }
 $("#compTable tbody").addEventListener("click", (e) => {
   const tr = e.target.closest("tr"); if (!tr) return;
@@ -366,12 +513,16 @@ function popupHtml(p, key) {
   const rank = rankIn(p.results, key) ?? (S.competitor ? null : p.rank);
   const a = S.analysis?.points?.find((x) => x.row === p.row && x.col === p.col);
   const ida = a?.difficulty?.ida;
-  const difficultyText = ida == null ? "IDA: dados insuficientes" : `IDA experimental: ${ida} / 100 (${esc(a.difficulty.level)})`;
+  const difficultyText = !indicatorEnabled("ida")
+    ? ""
+    : ida == null ? "IDA: dados insuficientes" : `IDA experimental: ${ida} / 100 (${esc(a.difficulty.level)})`;
   const opportunity = S.analysis?.iop?.points?.find((x) => x.row === p.row && x.col === p.col);
-  const opportunityText = opportunity?.score == null ? "" : `<div>IOP experimental: ${opportunity.score} / 100</div>`;
+  const opportunityText = !indicatorEnabled("iop") || opportunity?.score == null
+    ? ""
+    : `<div>IOP experimental: ${opportunity.score} / 100</div>`;
   const items = p.results.map((r) => `<li class="${sameBiz(r, key) ? "hit" : ""}">${esc(r.name)}${r.rating ? ` <span class="muted">★${r.rating}</span>` : ""}</li>`).join("");
   return `<div class="popup"><h4>${esc(key.name)}: ${rank ? "#" + rank : "not in top 20"}</h4>
-    <div class="muted">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div><div>${difficultyText}</div>${opportunityText}<ol>${items || "<li class='muted'>No results</li>"}</ol></div>`;
+    <div class="muted">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div>${difficultyText ? `<div>${difficultyText}</div>` : ""}${opportunityText}<ol>${items || "<li class='muted'>No results</li>"}</ol></div>`;
 }
 
 document.querySelectorAll("#viewToggle button").forEach((b) => b.addEventListener("click", () => {
@@ -466,6 +617,8 @@ async function loadZuriAnalysis(id) {
     renderScan(false);
   } catch (err) {
     if (!S.scan || S.scan.id !== id) return;
-    $("#analysisInfo").textContent = `Análise IVL/IDA indisponível: ${err.message}`;
+    $("#analysisInfo").textContent = hasEnabledAnalysisIndicator()
+      ? `Análise IVL/IDA indisponível: ${err.message}`
+      : "";
   }
 }

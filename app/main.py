@@ -9,13 +9,15 @@ Open:
 """
 
 import asyncio
+import os
 import logging
 
 from contextlib import asynccontextmanager
+from html import escape
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -146,11 +148,11 @@ class ScanIn(BaseModel):
 
 @app.get("/")
 def index():
-    """Serve the GeoGrid web interface."""
+    """Serve the web interface with its server-configured MapTiler key."""
 
-    return FileResponse(
-        STATIC / "index.html"
-    )
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    api_key = escape(os.environ.get("GEOGRID_MAPTILER_API_KEY", "").strip(), quote=True)
+    return HTMLResponse(page.replace("__GEOGRID_MAPTILER_API_KEY__", api_key))
 
 
 # --------------------------------------------------

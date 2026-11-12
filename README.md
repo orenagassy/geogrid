@@ -153,6 +153,22 @@ To scan automatically, schedule the `--business-id` command weekly with Windows 
 | `GEOGRID_PROXY` | none | Proxy, e.g. `http://user:pass@host:port` |
 | `GEOGRID_HEADLESS` | `1` | Set `0` to watch the browser work |
 | `GEOGRID_DB` | `geogrid.db` | SQLite database file |
+| `GEOGRID_MAPTILER_API_KEY` | none | MapTiler Cloud API key for the raster map |
+
+The web map uses MapTiler's official raster XYZ `streets-v4` tiles. Set
+`GEOGRID_MAPTILER_API_KEY` in the server environment before starting the app.
+In GitHub Codespaces, configure it as a Codespaces secret/environment variable
+and restart the app. In Easypanel, add it to the service's environment
+variables and restart or redeploy the service. The key is sent to the browser
+to request tiles, so use a public key restricted to the appropriate origin;
+prefer separate restricted keys for development and production. Keep the
+MapTiler and OpenStreetMap attribution shown on the map.
+
+Indicator visibility can be customized from the indicator guide (the menu
+below the app name). Changes take effect when applied and are saved in the
+browser's `localStorage`; first-time visitors see all indicators enabled.
+Restore the defaults to re-enable every indicator. This only changes what is
+displayed and does not change stored scan data or metric calculations.
 
 ## How it works
 
@@ -161,7 +177,7 @@ To scan automatically, schedule the `--business-id` command weekly with Windows 
 3. At each point, a fresh, cookie-free browser session searches Google Maps *as if standing at that spot* and reads the top 20 organic results.
 4. It finds your rank at every point, computes the metrics, and stores everything in a local SQLite database.
 
-**Tech:** Python · FastAPI · Playwright · SQLite · Leaflet + OpenStreetMap
+**Tech:** Python · FastAPI · Playwright · SQLite · Leaflet · MapTiler raster tiles (OpenStreetMap data)
 
 ```
 app/

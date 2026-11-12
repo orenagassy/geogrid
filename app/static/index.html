@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GeoGrid Rank Tracker</title>
+<meta name="maptiler-api-key" content="__GEOGRID_MAPTILER_API_KEY__">
+<title>Smart Grid by ZURI</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link rel="stylesheet" href="/static/style.css">
@@ -11,7 +12,16 @@
 <body>
 <aside id="side">
   <header class="brand">
-    <span class="logo">◉</span> GeoGrid <small>local rank heatmaps</small>
+    <div class="brand-name">
+      <span class="logo" aria-hidden="true">◉</span>
+      <span>Smart Grid by ZURI</span>
+      <small>local rank heatmaps</small>
+    </div>
+    <button id="helpMenuBtn" class="help-menu-button" type="button"
+            aria-haspopup="dialog" aria-controls="helpPanel" aria-expanded="false">
+      <span aria-hidden="true">☰</span>
+      <span>Indicadores e visualizações</span>
+    </button>
   </header>
 
   <section>
@@ -55,8 +65,141 @@
   </section>
 </aside>
 
+<dialog id="helpPanel" class="help-panel" aria-labelledby="helpPanelTitle">
+  <div class="help-panel-head">
+    <div>
+      <h2 id="helpPanelTitle">Guia de indicadores</h2>
+      <p class="muted small">Como interpretar os números, mapas e estados sem dados.</p>
+    </div>
+    <button id="closeHelpPanel" class="ghost" type="button" aria-label="Fechar guia">Fechar ×</button>
+  </div>
+  <div class="help-panel-content">
+    <section class="help-section" aria-labelledby="metricsHelpTitle">
+      <h3 id="metricsHelpTitle">Indicadores</h3>
+      <div class="indicator-preferences-actions">
+        <div class="indicator-bulk-actions">
+          <button id="selectAllIndicators" type="button" class="secondary">Selecionar todos</button>
+          <button id="deselectAllIndicators" type="button" class="secondary">Desmarcar todos</button>
+          <button id="restoreIndicatorDefaults" type="button" class="secondary">Restaurar padrão</button>
+        </div>
+        <button id="applyIndicatorPreferences" type="button" class="primary">Aplicar preferências</button>
+        <span id="indicatorPreferenceStatus" class="small muted" role="status" aria-live="polite"></span>
+      </div>
+      <div class="help-grid">
+        <article class="help-item" data-indicator-item="arp">
+          <div class="help-item-head">
+            <div><h4>ARP</h4><span class="indicator-full-name">Average Rank Position</span></div>
+            <label class="indicator-control"><input type="checkbox" data-indicator-toggle="arp" aria-label="Ativar ARP"><span data-indicator-state>Ativo</span></label>
+          </div>
+          <p>Média da posição quando encontrado; quanto menor, melhor.</p>
+        </article>
+        <article class="help-item" data-indicator-item="atrp">
+          <div class="help-item-head">
+            <div><h4>ATRP</h4><span class="indicator-full-name">Average Total Rank Position</span></div>
+            <label class="indicator-control"><input type="checkbox" data-indicator-toggle="atrp" aria-label="Ativar ATRP"><span data-indicator-state>Ativo</span></label>
+          </div>
+          <p>Média geral; ausências no top 20 contam como posição 21.</p>
+        </article>
+        <article class="help-item" data-indicator-item="solv">
+          <div class="help-item-head">
+            <div><h4>SoLV</h4><span class="indicator-full-name">Share of Local Voice</span></div>
+            <label class="indicator-control"><input type="checkbox" data-indicator-toggle="solv" aria-label="Ativar SoLV"><span data-indicator-state>Ativo</span></label>
+          </div>
+          <p>Percentual de pontos em que o negócio aparece no top 3.</p>
+        </article>
+        <article class="help-item" data-indicator-item="found">
+          <div class="help-item-head">
+            <div><h4>Found</h4><span class="indicator-full-name">Taxa de presença</span></div>
+            <label class="indicator-control"><input type="checkbox" data-indicator-toggle="found" aria-label="Ativar Found"><span data-indicator-state>Ativo</span></label>
+          </div>
+          <p>Percentual de pontos em que aparece entre as posições 1–20.</p>
+        </article>
+        <article class="help-item" data-indicator-item="ivl">
+          <div class="help-item-head">
+            <div><h4>IVL</h4><span class="indicator-full-name">Índice de Visibilidade Local</span></div>
+            <label class="indicator-control"><input type="checkbox" data-indicator-toggle="ivl" aria-label="Ativar IVL"><span data-indicator-state>Ativo</span></label>
+          </div>
+          <p>Visibilidade ponderada por posição, de 0 a 100; pontos com erro não entram.</p>
+        </article>
+        <article class="help-item" data-indicator-item="ida">
+          <div class="help-item-head">
+            <div><h4>IDA <span class="help-badge">Experimental</span></h4><span class="indicator-full-name">Índice de Dificuldade</span></div>
+            <label class="indicator-control"><input type="checkbox" data-indicator-toggle="ida" aria-label="Ativar IDA"><span data-indicator-state>Ativo</span></label>
+          </div>
+          <p>Dificuldade competitiva descritiva, de 0 a 100; não estima confiança.</p>
+        </article>
+        <article class="help-item" data-indicator-item="icm">
+          <div class="help-item-head">
+            <div><h4>ICM <span class="help-badge">Experimental</span></h4><span class="indicator-full-name">Índice de Concorrência</span></div>
+            <label class="indicator-control"><input type="checkbox" data-indicator-toggle="icm" aria-label="Ativar ICM"><span data-indicator-state>Ativo</span></label>
+          </div>
+          <p>Proxy de nota e volume de avaliações observados, de 0–100; não é confiança.</p>
+        </article>
+        <article class="help-item" data-indicator-item="icpb_v2">
+          <div class="help-item-head">
+            <div><h4>ICP-B V2 <span class="help-badge">Experimental</span></h4><span class="indicator-full-name">Índice de Pressão Competitiva</span></div>
+            <label class="indicator-control"><input type="checkbox" data-indicator-toggle="icpb_v2" aria-label="Ativar ICP-B V2"><span data-indicator-state>Ativo</span></label>
+          </div>
+          <p>Pressão competitiva observada na grade, de 0–100; não é probabilidade.</p>
+        </article>
+        <article class="help-item" data-indicator-item="iop">
+          <div class="help-item-head">
+            <div><h4>IOP <span class="help-badge">Protótipo não validado</span></h4><span class="indicator-full-name">Índice de Oportunidade</span></div>
+            <label class="indicator-control"><input type="checkbox" data-indicator-toggle="iop" aria-label="Ativar IOP"><span data-indicator-state>Ativo</span></label>
+          </div>
+          <p>Protótipo de oportunidade, de 0–100; não prevê sucesso nem vendas.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="help-section" aria-labelledby="viewsHelpTitle">
+      <h3 id="viewsHelpTitle">Visualizações e legendas</h3>
+      <div class="help-views">
+        <article class="help-view">
+          <h4>Rank</h4>
+          <p>A posição do negócio em cada ponto; “20+” significa que não foi encontrado no top 20.</p>
+          <div class="help-legend">
+            <span><i class="help-swatch r1"></i>1–3</span>
+            <span><i class="help-swatch r2"></i>4–10</span>
+            <span><i class="help-swatch r3"></i>11–20</span>
+            <span><i class="help-swatch r4"></i>20+</span>
+            <span><i class="help-swatch rx"></i>Erro (!)</span>
+          </div>
+        </article>
+        <article class="help-view">
+          <h4>Dificuldade</h4>
+          <p>IDA experimental de 0 a 100: verde 0–34,9 (fácil), amarelo 35–69,9 (média) e vermelho 70–100 (difícil).</p>
+          <div class="help-legend">
+            <span><i class="help-swatch ida-easy"></i>0–34,9</span>
+            <span><i class="help-swatch ida-medium"></i>35–69,9</span>
+            <span><i class="help-swatch ida-hard"></i>70–100</span>
+            <span><i class="help-swatch rx"></i>Sem dados (?) ou erro (!)</span>
+          </div>
+        </article>
+        <article class="help-view">
+          <h4>Oportunidade</h4>
+          <p>IOP protótipo não validado, de 0 a 100: o gradiente vai de vermelho (menor) a verde (maior oportunidade).</p>
+          <div class="help-legend">
+            <span><i class="help-swatch iop"></i>Menor → maior</span>
+            <span><i class="help-swatch rx"></i>Sem dados (?) ou erro (!)</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <p class="help-notice">
+      <strong>Importante:</strong> “?” indica dados insuficientes ou score indisponível; não significa zero.
+      “!” indica erro de varredura. Indicadores experimentais e protótipos são descritivos e não representam
+      previsões comprovadas de sucesso, vendas ou confiança.
+    </p>
+  </div>
+</dialog>
+
 <main>
   <div id="map"></div>
+  <div id="mapTileStatus" class="map-tile-status hidden" role="status">
+    Configure GEOGRID_MAPTILER_API_KEY no ambiente para carregar o mapa.
+  </div>
 
   <div id="scanCard" class="card hidden">
     <div class="card-head">
@@ -88,7 +231,7 @@
     </div>
     <div id="compBody">
       <table id="compTable">
-        <thead><tr><th>#</th><th>Business</th><th>SoLV</th><th>ATRP</th><th>Found</th><th>★</th></tr></thead>
+        <thead><tr><th>#</th><th>Business</th><th data-indicator-column="solv">SoLV</th><th data-indicator-column="atrp">ATRP</th><th data-indicator-column="found">Found</th><th>★</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
