@@ -56,6 +56,17 @@ def test_find_rank_not_found():
     assert find_rank(RESULTS, {"cid": "99", "name": "Nobody"}) is None
 
 
+def test_find_rank_by_place_id_when_cid_is_missing():
+    results = [
+        {"name": "Other", "cid": "1", "place_id": "other"},
+        {"name": "Target", "cid": None, "place_id": "target-place"},
+    ]
+    assert find_rank(
+        results,
+        {"cid": None, "place_id": "target-place", "name": "Different name"},
+    ) == 2
+
+
 def test_normalize_name():
     assert normalize_name("The Plumbing Co. & Sons, LLC") == "plumbing sons"
 

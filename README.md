@@ -46,6 +46,65 @@ Geo-grid tracking shows the full picture, and paid tools charge **$50–$100+ pe
 - 🚫 **Ads excluded.** "Sponsored" listings don't distort your organic Map Pack rankings.
 - 🔌 **Pluggable data source.** Free browser-based scanning by default, or switch to the DataForSEO API (about $0.002 per point) for high-volume agency use.
 
+## Experimental competitive indicators
+
+The read-only `/api/scans/{scan_id}/analysis` endpoint derives these indicators
+from scan results already stored in the local database. It does not start a scan
+or make additional DataForSEO requests.
+
+- **ICM** is an experimental reputation proxy based on the monitored business's
+  observed rating and review count. It is returned only when an official
+  identifier matches and repeated observations agree. It is not a probability
+  of trust.
+- **ICP-B V2** is a descriptive competitor-pressure score. It uses observed
+  competitor reputation, ranking position and territorial recurrence, after
+  excluding the monitored business and rejecting identifier conflicts. Its
+  provisional combination is 75% position-weighted reputation and 25%
+  territorial recurrence. The score requires at least 80% coverage of all
+  grid points, as well as the existing valid-point, review-coverage and
+  usable-point gates. Conflicting complete rating/review observations for one
+  official identity are omitted from its reputation component; incomplete
+  observations do not get combined into a synthetic pair. The response
+  distinguishes total-point coverage, valid points and usable points. Grid
+  points are spatially dependent, so the score is not a confidence interval
+  or an independent-sample estimate.
+- **ICE** classifies identified listings using visible evidence:
+  - `direct`: exact normalized category match with the monitored business;
+  - `indirect`: exact match with a related category explicitly supplied as a
+    `related_category` query parameter;
+  - `keyword_only`: the search phrase occurs in the listing name/category and
+    its known category differs from the monitored business;
+  - `indeterminate`: identity or classification evidence is missing or
+    inconsistent.
+
+  Search results currently provide names, categories and addresses, but not
+  descriptions or service lists. ICE does not infer those missing fields and
+  does not treat every result as a direct competitor. Divergent names for one
+  official identity are retained as a sorted observation list; keyword
+  evidence is evaluated across that list rather than selecting the first name.
+- **IDA** remains an experimental difficulty proxy. It deduplicates and
+  reconciles official identifiers before applying its sample gate, excludes
+  the monitored business when its official ID is known, and does not report a
+  statistical confidence estimate.
+- **IOP** is an unvalidated prototype. Its 50% / 25% / 25% weights are
+  approved for experimental testing only; the score is not a probability of
+  success, a sales forecast or proven opportunity. The candidate hypothesis
+  combines:
+  - 50% target-position gap: `(rank - 1) / 19`, with a missing top-20 rank
+    represented as a full observed gap;
+  - 25% competition ease: `1 - ICP-B V2 average strength`;
+  - 25% territorial ease: `1 - territorial recurrence`.
+
+  It averages available point-level values and withholds an overall score when
+  grid coverage or usable position/competition coverage is below 80%. These
+  weights and thresholds are provisional hypotheses, not statistically
+  validated parameters; points are spatially dependent and no probability or
+  confidence estimate is produced. **Do not treat IOP as a definitive indicator
+  until empirical calibration and further approval.**
+
+All experimental scores can be unavailable when the required observations are
+missing, inconsistent or below the stated coverage gates.
+
 ## Who it's for
 
 - **Local businesses** that want to know if their Google Maps ranking reaches their whole service area
@@ -94,6 +153,22 @@ To scan automatically, schedule the `--business-id` command weekly with Windows 
 | `GEOGRID_PROXY` | none | Proxy, e.g. `http://user:pass@host:port` |
 | `GEOGRID_HEADLESS` | `1` | Set `0` to watch the browser work |
 | `GEOGRID_DB` | `geogrid.db` | SQLite database file |
+| `GEOGRID_MAPTILER_API_KEY` | none | MapTiler Cloud API key for the raster map |
+
+The web map uses MapTiler's official raster XYZ `streets-v4` tiles. Set
+`GEOGRID_MAPTILER_API_KEY` in the server environment before starting the app.
+In GitHub Codespaces, configure it as a Codespaces secret/environment variable
+and restart the app. In Easypanel, add it to the service's environment
+variables and restart or redeploy the service. The key is sent to the browser
+to request tiles, so use a public key restricted to the appropriate origin;
+prefer separate restricted keys for development and production. Keep the
+MapTiler and OpenStreetMap attribution shown on the map.
+
+Indicator visibility can be customized from the indicator guide (the menu
+below the app name). Changes take effect when applied and are saved in the
+browser's `localStorage`; first-time visitors see all indicators enabled.
+Restore the defaults to re-enable every indicator. This only changes what is
+displayed and does not change stored scan data or metric calculations.
 
 ## How it works
 
@@ -102,7 +177,7 @@ To scan automatically, schedule the `--business-id` command weekly with Windows 
 3. At each point, a fresh, cookie-free browser session searches Google Maps *as if standing at that spot* and reads the top 20 organic results.
 4. It finds your rank at every point, computes the metrics, and stores everything in a local SQLite database.
 
-**Tech:** Python · FastAPI · Playwright · SQLite · Leaflet + OpenStreetMap
+**Tech:** Python · FastAPI · Playwright · SQLite · Leaflet · MapTiler raster tiles (OpenStreetMap data)
 
 ```
 app/

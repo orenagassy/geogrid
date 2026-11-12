@@ -154,7 +154,7 @@ def get_scan(scan_id: int, with_points: bool = True) -> dict | None:
     with connect() as c:
         row = c.execute(
             "SELECT s.*, b.name AS business_name, b.cid AS business_cid, b.lat AS business_lat,"
-            " b.lng AS business_lng FROM scans s JOIN businesses b ON b.id = s.business_id WHERE s.id = ?",
+            " b.lng AS business_lng, b.place_id AS business_place_id, b.category AS business_category FROM scans s JOIN businesses b ON b.id = s.business_id WHERE s.id = ?",
             (scan_id,)).fetchone()
         if not row:
             return None
